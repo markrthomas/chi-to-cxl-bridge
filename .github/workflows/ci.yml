@@ -1,0 +1,112 @@
+# CI: lint (Verilator) + directed simulation (Icarus) + coverage + SVA + formal (SymbiYosys).
+# Standard job layout (see ../DV_STANDARDS.md): regress (fast gate) → coverage / sva / formal / synth.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  # Pin OSS CAD Suite for reproducible formal CI; bump when upgrading tools.
+  OSS_CAD_SUITE_VERSION: "2026-04-13"
+  # Pinned Verible release for the advisory style-lint job (chipsalliance/verible).
+  VERIBLE_VERSION: "v0.0-3946-g851d3ff4"
+
+jobs:
+  regress:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iverilog verilator
+
+      - name: Lint (Verilator) + directed simulation + stress
+        run: make regress && make stress
+
+  coverage:
+    needs: regress
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y verilator
+
+      - name: Verilator coverage (chi_to_cxl_bridge)
+        run: make coverage
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-info
+          path: sim/coverage.info
+          if-no-files-found: ignore
+
+  sva:
+    needs: regress
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y verilator
+
+      - name: Interface SVA (Verilator --assert, all 4 valid/ready ports)
+        run: make sva
+
+  formal:
+    needs: regress
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: YosysHQ/setup-oss-cad-suite@v4
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          version: ${{ env.OSS_CAD_SUITE_VERSION }}
+
+      - name: SymbiYosys formal (infra modules proven; bridge top bmc + cover)
+        run: make formal
+
+  synth:
+    needs: regress
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: YosysHQ/setup-oss-cad-suite@v4
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          version: ${{ env.OSS_CAD_SUITE_VERSION }}
+
+      - name: Yosys synthesis smoke (no inferred latches)
+        run: make synth
+
+  # Advisory SystemVerilog style-lint (Verible). Non-blocking.
+  verible:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Verible ${{ env.VERIBLE_VERSION }}
+        run: |
+          set -euo pipefail
+          url="https://github.com/chipsalliance/verible/releases/download/${VERIBLE_VERSION}/verible-${VERIBLE_VERSION}-linux-static-x86_64.tar.gz"
+          echo "Fetching $url"
+          curl -fsSL "$url" -o /tmp/verible.tar.gz
+          mkdir -p /tmp/verible
+          tar -xzf /tmp/verible.tar.gz -C /tmp/verible --strip-components=1
+          echo "/tmp/verible/bin" >> "$GITHUB_PATH"
+
+      - name: Verible style-lint (advisory)
+        run: make verible-lint

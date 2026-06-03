@@ -1,0 +1,30 @@
+[tasks]
+bmc
+cover
+
+[options]
+bmc: mode bmc
+bmc: depth 24
+cover: mode cover
+cover: depth 32
+multiclock on
+
+[engines]
+smtbmc
+
+[script]
+# Yosys cwd is <taskdir>/src; repo RTL is four levels up. Module list mirrors
+# /rtl.f — keep in sync when adding modules. The bridge-top safety properties
+# (translation correctness, credit conservation, FIFO no-overflow, arbiter, and
+# egress data-stability) are checked by BMC + cover here; the standalone
+# async_fifo / credit_counter / reset_drain proofs discharge the unbounded
+# component guarantees. Closing an unbounded `prove` on the integrated top
+# (shadow-register / assume-guarantee composition) is tracked in doc/PLAN.md.
+read_verilog -sv -DFORMAL -I../../../../src ../../../../src/async_fifo.v
+read_verilog -sv -DFORMAL -I../../../../src ../../../../src/cdc_sync.v
+read_verilog -sv -DFORMAL -I../../../../src ../../../../src/reset_sync.v
+read_verilog -sv -DFORMAL -I../../../../src ../../../../src/credit_counter.v
+read_verilog -sv -DFORMAL -I../../../../src ../../../../src/credit_pulse_sync.v
+read_verilog -sv -DFORMAL -I../../../../src ../../../../src/reset_drain.v
+read_verilog -sv -DFORMAL -I../../../../src ../../../../src/chi_to_cxl_bridge.v
+prep -top chi_to_cxl_bridge
