@@ -63,9 +63,11 @@ graph LR
 - **Link State Management**: a reset-drain FSM (`DOWN → UP → DRAIN → DOWN`) gates
   the bridge open only while the link is up and drains cleanly on link-down.
 - **Verification**: directed + stress sim (Icarus) with a self-checking
-  scoreboard across clock ratios (1:1, 2:1, 1:3), a Verilator coverage harness at
-  **100%** line coverage (80% floor gated), concurrent **SVA** on all four
-  valid/ready interfaces (Verilator `--assert`), and SymbiYosys **formal**
+  scoreboard across clock ratios (1:1, 2:1, 1:3); a **cocotb + PyVSC** functional
+  coverage bench (covergroups over every opcode mapping, response kind, status,
+  and the CRC good/bad cross) at **100%**; a Verilator coverage harness at
+  **100%** line coverage (80% floor gated); concurrent **SVA** on all four
+  valid/ready interfaces (Verilator `--assert`); and SymbiYosys **formal**
   (`credit_counter`, `reset_drain`, the dual-clock `async_fifo` proven with
   unbounded `prove`/k-induction; the bridge top checked with BMC + cover).
 
@@ -131,6 +133,7 @@ All standard gates are exposed from the repo root (`make help` lists them):
 make regress     # Verilator lint + Icarus directed simulation (fast gate)
 make stress      # directed sim with heavy backpressure
 make coverage    # Verilator --coverage -> sim/coverage.info (100%; fails below 80% floor)
+make cocotb      # cocotb + PyVSC functional coverage (Icarus VPI) -> verification/cocotb/cov.xml
 make sva         # Verilator --assert: interface SVA on all 4 valid/ready ports
 make formal      # SymbiYosys: infra modules proven + bridge top bmc/cover
 make synth       # Yosys synthesis smoke (catch latches, area stats)
@@ -142,6 +145,11 @@ make ci          # regress + coverage + sva + formal + synth (comprehensive)
 Per-area Makefiles also run standalone, e.g. `make -C verification/directed stress`
 or `make -C verification/formal chi_to_cxl_bridge`.
 
+> **cocotb + PyVSC setup:** the functional-coverage bench needs `cocotb` and
+> `pyvsc` in the pip Python that `cocotb-config --python-bin` points at:
+> `/usr/bin/python3 -m pip install --user cocotb==1.8.1 pyvsc`. See
+> [verification/cocotb/README.md](verification/cocotb/README.md).
+
 ## Continuous Integration
 
 `.github/workflows/ci.yml` runs a fast `regress` gate (lint + directed sim +
@@ -151,6 +159,7 @@ stress), then fans out to parallel jobs that each depend on it:
 |:---|:---|:---|
 | `regress` | `make regress && make stress` | Verilator lint + Icarus directed/stress |
 | `coverage` | `make coverage` | enforces 80% line floor; uploads `coverage.info` |
+| `cocotb` | `make cocotb` | cocotb + PyVSC functional coverage; gates at 100%; uploads `cov.xml` |
 | `sva` | `make sva` | interface SVA under Verilator `--assert` |
 | `formal` | `make formal` | SymbiYosys (pinned OSS CAD Suite) |
 | `synth` | `make synth` | Yosys latch / area smoke |
@@ -159,6 +168,8 @@ stress), then fans out to parallel jobs that each depend on it:
 ## Documentation
 
 - **Design Specification**: [doc/design-spec.md](doc/design-spec.md) — architecture, opcode mapping, packet format, FSM, and verification stack.
+- **Coverage Plan**: [doc/coverage-plan.md](doc/coverage-plan.md) — code / functional / formal coverage levels and the PyVSC functional model.
+- **cocotb + PyVSC bench**: [verification/cocotb/README.md](verification/cocotb/README.md) — how to run, setup, and the covergroups.
 - **Plan**: [doc/PLAN.md](doc/PLAN.md) — current state and phased roadmap.
 
 ## Known Limits

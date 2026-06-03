@@ -26,9 +26,13 @@ Implemented and green locally:
 - [x] `make formal` — SymbiYosys: `credit_counter`, `reset_drain`, `async_fifo`
       proven (bmc + cover + unbounded `prove`/k-induction); `chi_to_cxl_bridge`
       top checked (bmc depth 24 + cover).
+- [x] `make cocotb` — cocotb + **PyVSC** functional-coverage bench (Icarus VPI):
+      covergroups over the request/response opcode maps, completion status, and
+      the CRC good/bad cross; gold-checked directed + randomized + closure tests;
+      **100%** functional coverage, UCIS XML written to `verification/cocotb/cov.xml`.
 - [x] `make synth` — Yosys synthesis smoke, no inferred latches.
-- [x] CI workflow (`.github/workflows/ci.yml`): regress / coverage / sva / formal
-      / synth / verible(advisory).
+- [x] CI workflow (`.github/workflows/ci.yml`): regress / coverage / cocotb / sva
+      / formal / synth / verible(advisory).
 
 ## Phase 1 — close formal on the bridge top
 
@@ -40,11 +44,16 @@ Implemented and green locally:
       standalone `async_fifo` `prove`.
 - [ ] Add per-module `prove` task to `chi_to_cxl_bridge.sby` and gate it in CI.
 
-## Phase 2 — cocotb UVM-equivalent bench
+## Phase 2 — cocotb + PyVSC functional coverage
 
-- [ ] Add `verification/cocotb/` (Icarus VPI) with a gold-model scoreboard and a
-      directed + randomized test list, matching the `cxl_lpddr5x_bridge` cocotb
-      layout. Wire `make cocotb` and a CI job (cocotb==1.8.1).
+- [x] Add `verification/cocotb/` (Icarus VPI) with a gold-model scoreboard,
+      directed + randomized + closure tests, and **PyVSC** covergroups. Wired to
+      `make cocotb` and a CI job (cocotb==1.8.1 + pyvsc). 100% functional coverage.
+      See [coverage-plan.md](coverage-plan.md).
+- [ ] Add a backpressure / FIFO-occupancy covergroup (req/rsp stall depth,
+      near-full credit states) — exercised today but not yet a gated covergroup.
+- [ ] Constrained-random stimulus with PyVSC `@vsc.randobj` (replace the ad-hoc
+      `random` builders) for closed-loop coverage-driven generation.
 
 ## Phase 3 — protocol fidelity
 

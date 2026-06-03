@@ -123,7 +123,8 @@ mismatch is counted in `crc_err_cnt` (crossed `cxl_clk → clk` via
 |:---|:---|:---|
 | Lint | Verilator `--lint-only -Wall` | all RTL modules |
 | Directed + stress | Icarus | self-checking scoreboard, clock ratios 1:1/2:1/1:3, every kind, ordering, link gating, error injection |
-| Coverage | Verilator `--coverage` + lcov | 100% line (80% floor gated) |
+| Coverage (line) | Verilator `--coverage` + lcov | 100% line (80% floor gated) |
+| Coverage (functional) | cocotb + PyVSC (`vsc`) | covergroups over opcode maps, response kinds, status, and CRC good/bad cross — 100% (see [coverage-plan.md](coverage-plan.md)) |
 | Interface SVA | Verilator `--assert` | valid-hold + data-stability + handshake/stall cover on all 4 ports |
 | Formal | SymbiYosys (smtbmc) | `credit_counter` / `reset_drain` / `async_fifo` proven (bmc + cover + unbounded prove); bridge top bmc depth 24 + cover |
 | Synthesis | Yosys | latch / area smoke |
