@@ -6,6 +6,8 @@
 # The formal .sby scripts read the same modules explicitly (different path base /
 # per-task subsets); keep them in sync with this list. Top module last.
 src/async_fifo.v
+src/sync_fifo.v
+src/tag_manager.v
 src/cdc_sync.v
 src/credit_counter.v
 src/credit_pulse_sync.v

@@ -21,6 +21,8 @@ smtbmc
 # component guarantees. Closing an unbounded `prove` on the integrated top
 # (shadow-register / assume-guarantee composition) is tracked in doc/PLAN.md.
 read_verilog -sv -DFORMAL -I../../../../src ../../../../src/async_fifo.v
+read_verilog -sv -DFORMAL -I../../../../src ../../../../src/sync_fifo.v
+read_verilog -sv -DFORMAL -I../../../../src ../../../../src/tag_manager.v
 read_verilog -sv -DFORMAL -I../../../../src ../../../../src/cdc_sync.v
 read_verilog -sv -DFORMAL -I../../../../src ../../../../src/reset_sync.v
 read_verilog -sv -DFORMAL -I../../../../src ../../../../src/credit_counter.v

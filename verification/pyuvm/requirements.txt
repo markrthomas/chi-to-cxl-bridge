@@ -1,0 +1,8 @@
+# PyUVM-on-cocotb tier for chi_to_cxl_bridge. Pins are loose on purpose; CI
+# installs these against the apt/OSS verilator + icarus images. Aligned with
+# ../ucie2-pipe7-bridge/dv/pyuvm/requirements.txt.
+cocotb>=1.9
+pyuvm>=3.0
+# Functional-coverage tier only (make fcov); pure-Python, independent of the
+# Verilator line-coverage tier.
+cocotb_coverage

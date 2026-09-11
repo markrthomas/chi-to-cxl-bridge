@@ -123,9 +123,10 @@ mismatch is counted in `crc_err_cnt` (crossed `cxl_clk → clk` via
 |:---|:---|:---|
 | Lint | Verilator `--lint-only -Wall` | all RTL modules |
 | Directed + stress | Icarus | self-checking scoreboard, clock ratios 1:1/2:1/1:3, every kind, ordering, link gating, error injection |
-| Coverage (line) | Verilator `--coverage` + lcov | 100% line (80% floor gated) |
-| Coverage (functional) | cocotb + PyVSC (`vsc`) | covergroups over opcode maps, response kinds, status, and CRC good/bad cross — 100% (see [coverage-plan.md](coverage-plan.md)) |
-| Interface SVA | Verilator `--assert` | valid-hold + data-stability + handshake/stall cover on all 4 ports |
+| Round-trip / translation | PyUVM scoreboard vs Python gold model | every driven read/write cross-checked (`make pyuvm`) |
+| Coverage (line) | Verilator `--coverage-line`, scored by `tools/coverage_report.py` | ~87% line (80% floor gated) |
+| Coverage (functional) | `cocotb_coverage` via PyUVM | REQ opcode / MemOpcode / RSP / CompData bins — 100% (see [coverage-plan.md](coverage-plan.md)) |
+| Bound SVA | Verilator `--assert` under the pyuvm run | M2S/CHI handshake stability, RSP legal-opcode, no-phantom-Req guard |
 | Formal | SymbiYosys (smtbmc) | `credit_counter` / `reset_drain` / `async_fifo` proven (bmc + cover + unbounded prove); bridge top bmc depth 24 + cover |
 | Synthesis | Yosys | latch / area smoke |
 

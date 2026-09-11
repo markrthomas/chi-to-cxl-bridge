@@ -73,7 +73,12 @@ module sync_fifo #(
     end
   end
 
+`ifdef FIFO_FORMAL_STANDALONE
   // Reachability (cover mode): show FIFO can fill, drain partially, and do same-cycle wr+rd.
+  // Guarded to the standalone proof environment (cf. async_fifo): these are
+  // unit-level reachability checks and must not become cover obligations for an
+  // integrated top-level proof, where the enclosing logic bounds how these
+  // FIFOs can be driven. The safety asserts above stay active in integration.
   always_ff @(posedge clk) begin
     if (rst_n === 1'b1) begin
       cover (full);
@@ -81,6 +86,7 @@ module sync_fifo #(
       cover ((count > {(ADDR_W + 1) {1'b0}}) && (count < DEPTH_CNT));
     end
   end
+`endif
 `endif
 
 endmodule

@@ -5,8 +5,14 @@
 // by dual-clock async FIFOs.
 //
 // Phase 3a: Structured flits (REQ, RwD, NDR, DRS) with 512-bit data beats.
+// Phase 3b: Multi-transaction tracking with tag management.
+// Phase 3c: Write data buffering and CHI DBIDResp handshake.
 
+// The defs header carries the full CHI/CXL protocol constant tables; not every
+// opcode is exercised by this bridge, so waive unused-parameter noise here.
+/* verilator lint_off UNUSEDPARAM */
 `include "chi_to_cxl_bridge_defs.vh"
+/* verilator lint_on UNUSEDPARAM */
 
 module chi_to_cxl_bridge #(
   parameter integer FIFO_DEPTH     = 8,
@@ -52,7 +58,12 @@ module chi_to_cxl_bridge #(
 
   // Link readiness and error injection
   input  wire                  link_up,
+  // err_inj_en drove the compact-packet CRC integrity path; the structured-flit
+  // model (Phase 3a) has no CRC field yet, so the injector is idle until the
+  // flit CRC is re-plumbed. Waive the unused-input warning until then.
+  /* verilator lint_off UNUSEDSIGNAL */
   input  wire                  err_inj_en,
+  /* verilator lint_on UNUSEDSIGNAL */
   output wire                  drain_done,
   // Status counters (clk domain)
   output reg  [15:0]           crc_err_cnt,
@@ -74,13 +85,11 @@ module chi_to_cxl_bridge #(
 
   // --- CDC for external control signals ---
   wire link_up_clk;
-
   cdc_sync #(.STAGES(2)) u_link_up_cdc (
     .clk(clk), .rst_n(clk_rst_n), .d(link_up), .q(link_up_clk)
   );
 
   // --- Request ordering classification ---
-  // Posted: writes (fire-and-forget on the CHI side).
   /* verilator lint_off UNUSEDSIGNAL */
   function automatic is_posted;
     input [CHI_REQ_W-1:0] pkt;
@@ -90,7 +99,7 @@ module chi_to_cxl_bridge #(
   endfunction
   /* verilator lint_on UNUSEDSIGNAL */
 
-  // --- Translation: CHI request -> CXL.mem M2S flit ---
+  // --- Translation functions ---
 
   /* verilator lint_off UNUSEDSIGNAL */
   function automatic [CXL_REQ_W-1:0] translate_chi_req_to_cxl;
@@ -103,7 +112,6 @@ module chi_to_cxl_bridge #(
         CHI_REQ_READONCE:  cxl_req[CXL_REQ_MEMOP_LSB +: CXL_REQ_MEMOP_W] = CXL_MEMRDDATA;
         default:           cxl_req[CXL_REQ_MEMOP_LSB +: CXL_REQ_MEMOP_W] = CXL_MEMINV;
       endcase
-
       cxl_req[CXL_REQ_SNPTYPE_LSB +: CXL_REQ_SNPTYPE_W] = 3'h0;
       cxl_req[CXL_REQ_METAFLD_LSB +: CXL_REQ_METAFLD_W] = 2'h0;
       cxl_req[CXL_REQ_METAVAL_LSB +: CXL_REQ_METAVAL_W] = 2'h0;
@@ -113,9 +121,7 @@ module chi_to_cxl_bridge #(
       translate_chi_req_to_cxl = cxl_req;
     end
   endfunction
-  /* verilator lint_on UNUSEDSIGNAL */
 
-  /* verilator lint_off UNUSEDSIGNAL */
   function automatic [CXL_RWD_W-1:0] translate_chi_wr_to_cxl;
     input [CHI_REQ_W-1:0] chi_req;
     input [CHI_DAT_W-1:0] chi_dat;
@@ -126,7 +132,6 @@ module chi_to_cxl_bridge #(
         CHI_REQ_WRITENOSNPPTL: cxl_rwd[CXL_RWD_MEMOP_LSB +: CXL_RWD_MEMOP_W] = CXL_MEMWRPTL;
         default:               cxl_rwd[CXL_RWD_MEMOP_LSB +: CXL_RWD_MEMOP_W] = CXL_MEMWR;
       endcase
-
       cxl_rwd[CXL_RWD_TAG_LSB     +: CXL_RWD_TAG_W]     = tag;
       cxl_rwd[CXL_RWD_ADDR_LSB    +: CXL_RWD_ADDR_W]    = chi_req[CHI_REQ_ADDR_LSB +: CHI_REQ_ADDR_W];
       cxl_rwd[CXL_RWD_METAFLD_LSB +: CXL_RWD_METAFLD_W] = 2'h0;
@@ -137,9 +142,6 @@ module chi_to_cxl_bridge #(
       translate_chi_wr_to_cxl = cxl_rwd;
     end
   endfunction
-  /* verilator lint_on UNUSEDSIGNAL */
-
-  // --- Translation: CXL.mem S2M response -> CHI response flit ---
 
   function automatic [CHI_RSP_W-1:0] translate_cxl_ndr_to_chi;
     input [CXL_NDR_W-1:0] cxl_ndr;
@@ -169,25 +171,30 @@ module chi_to_cxl_bridge #(
       translate_cxl_drs_to_chi = chi_dat;
     end
   endfunction
+  /* verilator lint_on UNUSEDSIGNAL */
 
-  // --- Internal signals ---
+  // --- Internal signals & state ---
 
-  wire req_posted_w_full;
-  wire req_posted_r_empty;
-  wire req_np_w_full;
-  wire req_np_r_empty;
-  wire rsp_ndr_w_full;
-  wire rsp_ndr_r_empty;
-  wire rsp_drs_w_full;
-  wire rsp_drs_r_empty;
+  wire req_posted_w_full, req_posted_r_empty;
+  wire req_np_w_full, req_np_r_empty;
+  wire req_dat_w_full, req_dat_r_empty;
+  wire rsp_ndr_w_full, rsp_ndr_r_empty;
+  wire rsp_int_w_full, rsp_int_r_empty;
+  wire rsp_drs_w_full, rsp_drs_r_empty;
 
   wire [CHI_REQ_W-1:0] req_posted_rd_data;
   wire [CHI_REQ_W-1:0] req_np_rd_data;
+  wire [CHI_DAT_W-1:0] req_dat_rd_data;
+  wire [CHI_RSP_W-1:0] rsp_int_rd_data;
+  // The TXNID field of these response reads is intentionally discarded and
+  // overwritten with the original CHI TXNID recovered from the tag manager,
+  // so those bits of the FIFO read data are legitimately unused.
+  /* verilator lint_off UNUSEDSIGNAL */
   wire [CHI_RSP_W-1:0] rsp_ndr_rd_data;
   wire [CHI_DAT_W-1:0] rsp_drs_rd_data;
+  /* verilator lint_on UNUSEDSIGNAL */
 
-  wire req_posted_r_empty_clk;
-  wire req_np_r_empty_clk;
+  wire req_posted_r_empty_clk, req_np_r_empty_clk;
   cdc_sync #(.STAGES(2)) u_p_empty_cdc (
     .clk(clk), .rst_n(clk_rst_n), .d(req_posted_r_empty), .q(req_posted_r_empty_clk)
   );
@@ -195,7 +202,7 @@ module chi_to_cxl_bridge #(
     .clk(clk), .rst_n(clk_rst_n), .d(req_np_r_empty), .q(req_np_r_empty_clk)
   );
 
-  wire all_empty = req_posted_r_empty_clk && req_np_r_empty_clk && rsp_ndr_r_empty && rsp_drs_r_empty;
+  wire all_empty = req_posted_r_empty_clk && req_np_r_empty_clk && rsp_ndr_r_empty && rsp_int_r_empty && rsp_drs_r_empty && req_dat_r_empty;
   wire bridge_open;
   reset_drain u_reset_drain (
     .clk(clk), .rst_n(clk_rst_n), .link_up(link_up_clk), .all_empty(all_empty), .open(bridge_open), .drain_done(drain_done)
@@ -208,30 +215,105 @@ module chi_to_cxl_bridge #(
 
   wire chi_req_is_posted_w = is_posted(chi_req_data);
   localparam integer OCC_W = $clog2(FIFO_DEPTH) + 1;
-  wire [OCC_W-1:0] req_p_occ, req_np_occ, rsp_ndr_occ, rsp_drs_occ;
+  wire [OCC_W-1:0] req_p_occ, req_np_occ;
+  // Response-FIFO write-side occupancy lives in the cxl_clk domain (unsafe to
+  // sample in the clk-domain status counter) and the write-data FIFO occupancy
+  // is not used for credit; keep these as observation-only nets.
+  /* verilator lint_off UNUSEDSIGNAL */
+  wire [OCC_W-1:0] rsp_ndr_occ, rsp_drs_occ, req_dat_occ;
+  /* verilator lint_on UNUSEDSIGNAL */
   localparam [15:0] POSTED_LIM = POSTED_CREDITS[15:0], NP_LIM = NP_CREDITS[15:0];
   wire posted_crd_avail = ({{(16-OCC_W){1'b0}}, req_p_occ} < POSTED_LIM);
   wire np_crd_avail = ({{(16-OCC_W){1'b0}}, req_np_occ} < NP_LIM);
 
-  assign chi_req_ready = bridge_open && (chi_req_is_posted_w ? (!req_posted_w_full && posted_crd_avail) : (!req_np_w_full && np_crd_avail));
-  assign chi_wr_data_ready = chi_req_ready && chi_req_valid && chi_req_is_posted_w;
+  // Tag Manager (clk domain)
+  wire tag_alloc_vld, tag_alloc_rdy;
+  wire [TXNID_W-1:0] tag_alloc_txnid = chi_req_data[CHI_REQ_TXNID_LSB +: TXNID_W];
+  wire [NODEID_W-1:0] tag_alloc_srcid = chi_req_data[CHI_REQ_SRCID_LSB +: NODEID_W];
+  wire [TAG_W-1:0] tag_alloc_tag;
+
+  assign tag_alloc_vld = chi_req_valid && bridge_open;
+
+  // A posted write also enqueues a DBIDResp into u_rsp_int, so gate its accept on
+  // that FIFO having room too — otherwise the DBIDResp would be silently dropped.
+  assign chi_req_ready = bridge_open && tag_alloc_rdy && (chi_req_is_posted_w ? (!req_posted_w_full && posted_crd_avail && !rsp_int_w_full) : (!req_np_w_full && np_crd_avail));
+  assign chi_wr_data_ready = !req_dat_w_full;
   assign cxl_rx_ndr_ready = bridge_open_cxl && !rsp_ndr_w_full;
   assign cxl_rx_drs_ready = bridge_open_cxl && !rsp_drs_w_full;
-  assign chi_rsp_valid = !rsp_ndr_r_empty;
-  assign chi_rsp_data = rsp_ndr_rd_data;
+
+  // Internal DBIDResp generation (clk domain)
+  wire dbid_resp_wr = chi_req_valid && chi_req_ready && chi_req_is_posted_w;
+  wire [CHI_RSP_W-1:0] dbid_resp_wdata;
+  assign dbid_resp_wdata[CHI_RSP_RESPERR_LSB +: CHI_RSP_RESPERR_W] = CHI_RESPERR_OK;
+  assign dbid_resp_wdata[CHI_RSP_DBID_LSB    +: CHI_RSP_DBID_W]    = {{(CHI_RSP_DBID_W-TAG_W){1'b0}}, tag_alloc_tag};
+  assign dbid_resp_wdata[CHI_RSP_TXNID_LSB   +: CHI_RSP_TXNID_W]   = tag_alloc_txnid;
+  assign dbid_resp_wdata[CHI_RSP_OPCODE_LSB  +: CHI_RSP_OPCODE_W]  = CHI_RSP_DBIDRESP;
+  assign dbid_resp_wdata[CHI_RSP_SRCID_LSB   +: CHI_RSP_SRCID_W]   = 7'h0;
+
+  sync_fifo #(.WIDTH(CHI_RSP_W), .DEPTH(4)) u_rsp_int (
+    .clk(clk), .rst_n(clk_rst_n), .wr_en(dbid_resp_wr), .wr_data(dbid_resp_wdata), .full(rsp_int_w_full),
+    .empty(rsp_int_r_empty), .rd_en(chi_rsp_valid && chi_rsp_ready && rsp_ndr_r_empty),
+    .rd_data(rsp_int_rd_data)
+  );
+
+  assign chi_rsp_valid = !rsp_ndr_r_empty || !rsp_int_r_empty;
+
+  wire [TXNID_W-1:0] release_a_txnid, release_b_txnid;
+  // SrcID recovery is tracked by the tag manager but the current CHI response
+  // flit model does not carry a TgtID field to route it back into, so the
+  // recovered SrcID is observation-only for now.
+  /* verilator lint_off UNUSEDSIGNAL */
+  wire [NODEID_W-1:0] release_a_srcid, release_b_srcid;
+  /* verilator lint_on UNUSEDSIGNAL */
+
+  wire [CHI_RSP_W-1:0] chi_rsp_data_recovered = {
+    rsp_ndr_rd_data[CHI_RSP_W-1 : CHI_RSP_TXNID_LSB + TXNID_W],
+    release_a_txnid,
+    rsp_ndr_rd_data[CHI_RSP_TXNID_LSB - 1 : 0]
+  };
+  assign chi_rsp_data  = !rsp_ndr_r_empty ? chi_rsp_data_recovered : rsp_int_rd_data;
+
+  wire [CHI_DAT_W-1:0] chi_comp_data_recovered = {
+    rsp_drs_rd_data[CHI_DAT_W-1 : CHI_DAT_TXNID_LSB + TXNID_W],
+    release_b_txnid,
+    rsp_drs_rd_data[CHI_DAT_TXNID_LSB - 1 : 0]
+  };
   assign chi_comp_data_valid = !rsp_drs_r_empty;
-  assign chi_comp_data = rsp_drs_rd_data;
+  assign chi_comp_data = chi_comp_data_recovered;
+
+  wire release_a_vld = chi_rsp_valid && chi_rsp_ready && !rsp_ndr_r_empty;
+  wire release_b_vld = chi_comp_data_valid && chi_comp_data_ready;
+
+  tag_manager #(.TAG_W(TAG_W), .TXNID_W(TXNID_W), .SRCID_W(NODEID_W)) u_tag_mgr (
+    .clk(clk), .rst_n(clk_rst_n),
+    .alloc_vld(tag_alloc_vld), .alloc_txnid(tag_alloc_txnid), .alloc_srcid(tag_alloc_srcid), .alloc_rdy(tag_alloc_rdy), .alloc_tag(tag_alloc_tag),
+    .release_a_vld(release_a_vld), .release_a_tag(rsp_ndr_rd_data[CHI_RSP_DBID_LSB +: TAG_W]), .release_a_txnid(release_a_txnid), .release_a_srcid(release_a_srcid),
+    .release_b_vld(release_b_vld), .release_b_tag(rsp_drs_rd_data[CHI_DAT_TXNID_LSB +: TAG_W]), .release_b_txnid(release_b_txnid), .release_b_srcid(release_b_srcid)
+  );
+
+  wire [CHI_REQ_W-1:0] chi_req_data_tagged = {
+    chi_req_data[CHI_REQ_W-1 : CHI_REQ_TXNID_LSB + TXNID_W],
+    {{(TXNID_W-TAG_W){1'b0}}, tag_alloc_tag},
+    chi_req_data[CHI_REQ_TXNID_LSB - 1 : 0]
+  };
 
   reg arb_locked_r, arb_sel_posted_r;
-  wire arb_sel_now = !req_posted_r_empty;
+  wire arb_posted_ready = !req_posted_r_empty && !req_dat_r_empty;
+  wire arb_sel_now = arb_posted_ready;
   wire arb_sel_final = arb_locked_r ? arb_sel_posted_r : arb_sel_now;
   wire [CHI_REQ_W-1:0] arb_rd_data = arb_sel_final ? req_posted_rd_data : req_np_rd_data;
   wire [TAG_W-1:0] txn_tag = arb_rd_data[CHI_REQ_TXNID_LSB +: TAG_W];
 
-  assign cxl_tx_req_valid = (!req_posted_r_empty || !req_np_r_empty) && !is_chi_write(arb_rd_data[CHI_REQ_OPCODE_LSB +: CHI_REQ_OPCODE_W]);
+  // Present a read only when the ARBITER-SELECTED source is genuinely non-empty.
+  // Using (!posted_empty || !np_empty) let a write pending in the posted FIFO (its
+  // data not yet arrived, so arb selects the empty np side) drive a phantom M2S
+  // Req from stale/zero np read data (opcode 0 -> MemInv). Qualify on the selected
+  // source instead; writes are emitted on the RwD channel below.
+  wire arb_src_nonempty = arb_sel_final ? !req_posted_r_empty : !req_np_r_empty;
+  assign cxl_tx_req_valid = arb_src_nonempty && !is_chi_write(arb_rd_data[CHI_REQ_OPCODE_LSB +: CHI_REQ_OPCODE_W]);
   assign cxl_tx_req_data = translate_chi_req_to_cxl(arb_rd_data, txn_tag);
-  assign cxl_tx_rwd_valid = (!req_posted_r_empty) && arb_sel_final && is_chi_write(arb_rd_data[CHI_REQ_OPCODE_LSB +: CHI_REQ_OPCODE_W]);
-  assign cxl_tx_rwd_data = translate_chi_wr_to_cxl(arb_rd_data, chi_wr_data, txn_tag);
+  assign cxl_tx_rwd_valid = arb_posted_ready && arb_sel_final && is_chi_write(arb_rd_data[CHI_REQ_OPCODE_LSB +: CHI_REQ_OPCODE_W]);
+  assign cxl_tx_rwd_data = translate_chi_wr_to_cxl(arb_rd_data, req_dat_rd_data, txn_tag);
 
   always @(posedge cxl_clk or negedge cxl_rst_n) begin
     if (!cxl_rst_n) begin
@@ -250,18 +332,24 @@ module chi_to_cxl_bridge #(
   wire req_np_wr = req_wr && !chi_req_is_posted_w;
   wire req_posted_rd = (cxl_tx_req_valid && cxl_tx_req_ready && arb_sel_final) || (cxl_tx_rwd_valid && cxl_tx_rwd_ready && arb_sel_final);
   wire req_np_rd = cxl_tx_req_valid && cxl_tx_req_ready && !arb_sel_final;
+  wire req_dat_wr = chi_wr_data_valid && chi_wr_data_ready;
+  wire req_dat_rd = cxl_tx_rwd_valid && cxl_tx_rwd_ready;
 
   async_fifo #(.WIDTH(CHI_REQ_W), .DEPTH(FIFO_DEPTH)) u_req_posted (
-    .w_clk(clk), .w_rst_n(clk_rst_n), .w_en(req_posted_wr), .w_data(chi_req_data), .w_full(req_posted_w_full), .w_occupancy(req_p_occ),
+    .w_clk(clk), .w_rst_n(clk_rst_n), .w_en(req_posted_wr), .w_data(chi_req_data_tagged), .w_full(req_posted_w_full), .w_occupancy(req_p_occ),
     .r_clk(cxl_clk), .r_rst_n(cxl_rst_n), .r_en(req_posted_rd), .r_data(req_posted_rd_data), .r_empty(req_posted_r_empty)
   );
   async_fifo #(.WIDTH(CHI_REQ_W), .DEPTH(FIFO_DEPTH)) u_req_np (
-    .w_clk(clk), .w_rst_n(clk_rst_n), .w_en(req_np_wr), .w_data(chi_req_data), .w_full(req_np_w_full), .w_occupancy(req_np_occ),
+    .w_clk(clk), .w_rst_n(clk_rst_n), .w_en(req_np_wr), .w_data(chi_req_data_tagged), .w_full(req_np_w_full), .w_occupancy(req_np_occ),
     .r_clk(cxl_clk), .r_rst_n(cxl_rst_n), .r_en(req_np_rd), .r_data(req_np_rd_data), .r_empty(req_np_r_empty)
+  );
+  async_fifo #(.WIDTH(CHI_DAT_W), .DEPTH(FIFO_DEPTH)) u_req_dat (
+    .w_clk(clk), .w_rst_n(clk_rst_n), .w_en(req_dat_wr), .w_data(chi_wr_data), .w_full(req_dat_w_full), .w_occupancy(req_dat_occ),
+    .r_clk(cxl_clk), .r_rst_n(cxl_rst_n), .r_en(req_dat_rd), .r_data(req_dat_rd_data), .r_empty(req_dat_r_empty)
   );
   async_fifo #(.WIDTH(CHI_RSP_W), .DEPTH(FIFO_DEPTH)) u_rsp_ndr (
     .w_clk(cxl_clk), .w_rst_n(cxl_rst_n), .w_en(cxl_rx_ndr_valid && cxl_rx_ndr_ready), .w_data(translate_cxl_ndr_to_chi(cxl_rx_ndr_data)), .w_full(rsp_ndr_w_full), .w_occupancy(rsp_ndr_occ),
-    .r_clk(clk), .r_rst_n(clk_rst_n), .r_en(chi_rsp_valid && chi_rsp_ready), .r_data(rsp_ndr_rd_data), .r_empty(rsp_ndr_r_empty)
+    .r_clk(clk), .r_rst_n(clk_rst_n), .r_en(chi_rsp_valid && chi_rsp_ready && !rsp_ndr_r_empty), .r_data(rsp_ndr_rd_data), .r_empty(rsp_ndr_r_empty)
   );
   async_fifo #(.WIDTH(CHI_DAT_W), .DEPTH(FIFO_DEPTH)) u_rsp_drs (
     .w_clk(cxl_clk), .w_rst_n(cxl_rst_n), .w_en(cxl_rx_drs_valid && cxl_rx_drs_ready), .w_data(translate_cxl_drs_to_chi(cxl_rx_drs_data)), .w_full(rsp_drs_w_full), .w_occupancy(rsp_drs_occ),

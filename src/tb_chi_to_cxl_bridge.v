@@ -163,19 +163,26 @@ module tb_chi_to_cxl_bridge;
     chi_req_data[CHI_REQ_TXNID_LSB  +: CHI_REQ_TXNID_W]  = 8'hD2;
     chi_req_valid = 1'b1;
 
-    chi_wr_data = {CHI_DAT_W{1'b0}};
-    chi_wr_data[CHI_DAT_DATA_LSB +: CHI_DAT_DATA_W] = 512'h12345678_9ABCDEF0_FEDCBA98_76543210_11223344_55667788_99AABBCC_DDEEFF00;
-    chi_wr_data[CHI_DAT_BE_LSB   +: CHI_DAT_BE_W]   = {BE_W{1'b1}}; // All bytes enabled
-    chi_wr_data_valid = 1'b1;
-
-    cxl_tx_rwd_ready = 1'b1;
-
     @(posedge clk);
     while (!chi_req_ready) @(posedge clk);
     chi_req_valid = 1'b0;
+
+    $display("INFO: WR REQ sent, waiting for DBIDResp");
+    chi_rsp_ready = 1'b1;
+    wait (chi_rsp_valid && chi_rsp_data[CHI_RSP_OPCODE_LSB +: CHI_RSP_OPCODE_W] === CHI_RSP_DBIDRESP);
+    $display("INFO: DBIDResp received, sending data");
+
+    chi_wr_data = {CHI_DAT_W{1'b0}};
+    chi_wr_data[CHI_DAT_DATA_LSB +: CHI_DAT_DATA_W] = 512'h12345678_9ABCDEF0_FEDCBA98_76543210_11223344_55667788_99AABBCC_DDEEFF00;
+    chi_wr_data[CHI_DAT_BE_LSB   +: CHI_DAT_BE_W]   = {BE_W{1'b1}};
+    chi_wr_data_valid = 1'b1;
+    cxl_tx_rwd_ready = 1'b1;
+
+    @(posedge clk);
+    while (!chi_wr_data_ready) @(posedge clk);
     chi_wr_data_valid = 1'b0;
 
-    $display("INFO: WR sent to bridge, waiting for CXL TX RWD");
+    $display("INFO: WR data sent to bridge, waiting for CXL TX RWD");
     wait (cxl_tx_rwd_valid);
     $display("INFO: CXL TX RWD detected: opcode=%h addr=%h data_lsb=%h",
              cxl_tx_rwd_data[CXL_RWD_MEMOP_LSB +: CXL_RWD_MEMOP_W],
@@ -196,7 +203,7 @@ module tb_chi_to_cxl_bridge;
     @(posedge clk);
     cxl_rx_ndr_data = {CXL_NDR_W{1'b0}};
     cxl_rx_ndr_data[CXL_NDR_OPCODE_LSB +: CXL_NDR_OPCODE_W] = CXL_NDR_CMP;
-    cxl_rx_ndr_data[CXL_NDR_TAG_LSB    +: CXL_NDR_TAG_W]    = 4'hC;
+    cxl_rx_ndr_data[CXL_NDR_TAG_LSB    +: CXL_NDR_TAG_W]    = 4'h0; // Tag 0 (ReadNoSnp)
     cxl_rx_ndr_valid = 1'b1;
     chi_rsp_ready    = 1'b1;
 
@@ -206,22 +213,22 @@ module tb_chi_to_cxl_bridge;
 
     $display("INFO: NDR sent to bridge, waiting for CHI RSP");
     wait (chi_rsp_valid);
-    $display("INFO: CHI RSP detected: opcode=%h dbid=%h",
+    $display("INFO: CHI RSP detected: opcode=%h txnid=%h",
              chi_rsp_data[CHI_RSP_OPCODE_LSB +: CHI_RSP_OPCODE_W],
-             chi_rsp_data[CHI_RSP_DBID_LSB   +: CHI_RSP_DBID_W]);
+             chi_rsp_data[CHI_RSP_TXNID_LSB  +: CHI_RSP_TXNID_W]);
 
     if (chi_rsp_data[CHI_RSP_OPCODE_LSB +: CHI_RSP_OPCODE_W] !== CHI_RSP_COMP) begin
        $display("FAIL: expected CHI_RSP_COMP"); $finish(1);
     end
-    if (chi_rsp_data[CHI_RSP_DBID_LSB +: CHI_RSP_DBID_W] !== 4'hC) begin
-       $display("FAIL: dbid mismatch"); $finish(1);
+    if (chi_rsp_data[CHI_RSP_TXNID_LSB +: CHI_RSP_TXNID_W] !== 8'h3C) begin
+       $display("FAIL: txnid mismatch exp=3C got=%h", chi_rsp_data[CHI_RSP_TXNID_LSB +: CHI_RSP_TXNID_W]); $finish(1);
     end
 
     $display("INFO: Starting Phase 3a DRS smoke test");
     @(posedge clk);
     cxl_rx_drs_data = {CXL_DRS_W{1'b0}};
     cxl_rx_drs_data[CXL_DRS_OPCODE_LSB +: CXL_DRS_OPCODE_W] = CXL_DRS_MEMDATA;
-    cxl_rx_drs_data[CXL_DRS_TAG_LSB    +: CXL_DRS_TAG_W]    = 4'hA;
+    cxl_rx_drs_data[CXL_DRS_TAG_LSB    +: CXL_DRS_TAG_W]    = 4'h1; // Tag 1 (WriteNoSnp)
     cxl_rx_drs_data[CXL_DRS_DATA_LSB   +: 64]               = 64'hFEED_FACE_CAFE_BABE;
     cxl_rx_drs_valid = 1'b1;
     chi_comp_data_ready = 1'b1;
@@ -239,6 +246,9 @@ module tb_chi_to_cxl_bridge;
 
     if (chi_comp_data[CHI_DAT_OPCODE_LSB +: CHI_DAT_OPCODE_W] !== CHI_DAT_COMPDATA) begin
        $display("FAIL: expected CHI_DAT_COMPDATA"); $finish(1);
+    end
+    if (chi_comp_data[CHI_DAT_TXNID_LSB +: CHI_DAT_TXNID_W] !== 8'hD2) begin
+       $display("FAIL: txnid mismatch exp=D2 got=%h", chi_comp_data[CHI_DAT_TXNID_LSB +: CHI_DAT_TXNID_W]); $finish(1);
     end
     if (chi_comp_data[CHI_DAT_DATA_LSB +: 64] !== 64'hFEED_FACE_CAFE_BABE) begin
        $display("FAIL: data mismatch"); $finish(1);
