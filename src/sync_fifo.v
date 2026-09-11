@@ -65,11 +65,20 @@ module sync_fifo #(
     assume (rd_ptr < DEPTH);
   end
 
-  // Bounded-model properties (SymbiYosys / Yosys); not enabled for normal simulation.
+  // Assume-guarantee occupancy invariant (mirrors async_fifo's FIFO_OCC_CHECK):
+  // ASSERTED and proven k-inductive in the standalone sync_fifo proof
+  // (FIFO_FORMAL_STANDALONE), and ASSUMED when instantiated inside an integrated
+  // top -- otherwise the top's k-induction is free to seed this black-box FIFO in
+  // an unreachable over-full state and spuriously fail a bounds assert.
+`ifdef FIFO_FORMAL_STANDALONE
+  `define SFIFO_OCC_CHECK assert
+`else
+  `define SFIFO_OCC_CHECK assume
+`endif
   always_ff @(posedge clk) begin
     if (rst_n === 1'b1) begin
-      assert (count <= DEPTH_CNT);
-      assert (count >= {(ADDR_W + 1) {1'b0}});
+      `SFIFO_OCC_CHECK (count <= DEPTH_CNT);
+      `SFIFO_OCC_CHECK (count >= {(ADDR_W + 1) {1'b0}});
     end
   end
 

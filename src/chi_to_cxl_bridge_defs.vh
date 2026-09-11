@@ -20,7 +20,16 @@
 `define CHI_TO_CXL_BRIDGE_DEFS_VH
 
 // ---- Global widths ----
+// Data-width abstraction for the integrated formal `prove`: the bridge's safety
+// properties (handshake valid/data stability, credit conservation, FIFO
+// occupancy, routing) are width-independent, but a full 512-bit datapath makes
+// the unbounded SMT proof intractable on memory. FORMAL_SMALL_DATA shrinks the
+// beat for the bridge .sby only; simulation, coverage, SVA and synth keep 512.
+`ifdef FORMAL_SMALL_DATA
+localparam integer DATA_W   = 8;            // abstracted beat (formal prove only)
+`else
 localparam integer DATA_W   = 512;          // one 64-byte beat
+`endif
 localparam integer BE_W     = DATA_W/8;     // 64
 localparam integer CHI_CXL_ADDR_W = 48;
 localparam integer TXNID_W  = 8;            // CHI TxnID

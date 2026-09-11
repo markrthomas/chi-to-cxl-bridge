@@ -25,9 +25,11 @@ Implemented and green locally:
 - [x] `make sva` — bound SVA checker (`verification/uvm/sv/chi_to_cxl_sva.sv`)
       verified under the pyuvm round-trip (Verilator `--assert`): M2S/CHI
       handshake stability, RSP legal-opcode, and the no-phantom-Req guard. PASS.
-- [x] `make formal` — SymbiYosys: `credit_counter`, `reset_drain`, `async_fifo`
-      proven (bmc + cover + unbounded `prove`/k-induction); `chi_to_cxl_bridge`
-      top checked (bmc depth 24 + cover).
+- [x] `make formal` — SymbiYosys: `credit_counter`, `reset_drain`, `async_fifo`,
+      `sync_fifo` proven (bmc + cover + unbounded `prove`/k-induction); the
+      `chi_to_cxl_bridge` top now also closes an unbounded `prove` (bmc depth 24 +
+      cover + k-induction), using a data-width abstraction (`FORMAL_SMALL_DATA`)
+      so the wide-datapath SMT proof is tractable.
 - [x] `make pyuvm` / `make fcov` — PyUVM-on-cocotb tier aligned with
       `../ucie2-pipe7-bridge/dv/pyuvm`: env + scoreboard cross-checking round-trip
       identity and request translation against the Python gold model
@@ -37,15 +39,28 @@ Implemented and green locally:
 - [x] CI workflow (`.github/workflows/ci.yml`): regress / pyuvm / fcov / coverage
       / sva / formal / synth / verible(advisory).
 
-## Phase 1 — close formal on the bridge top
+## Phase 1 — close formal on the bridge top  ✅
 
-- [ ] Port the shadow-register + assume-guarantee composition used in
-      `cxl_lpddr5x_bridge.sby` so the integrated `chi_to_cxl_bridge` top closes an
-      unbounded `prove` (currently bmc + cover only). The FORMAL block in
-      `chi_to_cxl_bridge.v` already mirrors the proven egress-stability and
-      arbiter-lock invariants; the FIFO occupancy guarantee is discharged by the
-      standalone `async_fifo` `prove`.
-- [ ] Add per-module `prove` task to `chi_to_cxl_bridge.sby` and gate it in CI.
+- [x] The integrated `chi_to_cxl_bridge` top closes an unbounded `prove`
+      (k-induction), added as a `prove` task in `chi_to_cxl_bridge.sby`.
+      Getting there required three changes:
+  - **Decouple the M2S egress arbiter.** CXL.mem Req (reads) and RwD (writes) are
+    independent message classes, but a legacy shared arbiter (`arb_locked_r` /
+    `arb_sel_*`) coupled them. It made egress-Req `valid` depend on `arb_sel_final`
+    (and, transiently, on FIFO *contents*), which both allowed a phantom Req and
+    was not k-inductive. Each channel now presents its own source FIFO head
+    (`valid = source non-empty`), so a stalled beat is never popped and holds
+    stable — the reference's proven structure. This also removed the phantom-Req
+    class of bug at the source (superseding the earlier qualifier patch).
+  - **`sync_fifo` assume-guarantee** (mirrors `async_fifo`): occupancy invariant
+    ASSERTED + proven k-inductive standalone (`sync_fifo.sby`, `-DFIFO_FORMAL_STANDALONE`),
+    ASSUMED in integration.
+  - **Data-width abstraction** (`FORMAL_SMALL_DATA`): the properties are
+    width-independent, so the bridge `.sby` shrinks the 512-bit beat to keep the
+    unbounded SMT proof within memory; sim / coverage / SVA / synth keep 512.
+- [x] `prove` gated in CI via the `formal` job (runs the full `make formal`).
+- [ ] Full-width unbounded `prove` (no data abstraction) if a higher-memory
+      runner / FIFO-memory abstraction is set up — currently sim covers full width.
 
 ## Phase 2 — functional coverage (now PyUVM-on-cocotb)
 
