@@ -1,16 +1,21 @@
 # Simulation and Documentation build artifacts
 verification/directed/build/
-verification/cocotb/sim_build/
-verification/cocotb/__pycache__/
-verification/cocotb/**/*.pyc
-verification/cocotb/results.xml
-verification/cocotb/cov.xml
 
-# Verilator coverage / assertion / trace build artifacts
-sim/obj_dir_cov/
-sim/obj_dir_sva/
-sim/obj_dir_vcd/
-sim/coverage.info
+# PyUVM-on-cocotb tier build artifacts (verification/pyuvm)
+verification/pyuvm/sim_build/
+verification/pyuvm/cov_build/
+verification/pyuvm/assert_build/
+verification/pyuvm/wave_build/
+verification/pyuvm/build/
+verification/pyuvm/results.xml
+verification/pyuvm/coverage.dat
+verification/pyuvm/**/__pycache__/
+verification/pyuvm/**/*.pyc
+verification/common/models/__pycache__/
+
+# Coverage / waveform / synth outputs
+build/coverage/
+build/waves/
 sim/synth.log
 doc/build/
 

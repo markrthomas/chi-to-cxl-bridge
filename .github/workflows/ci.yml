@@ -1,5 +1,6 @@
-# CI: lint (Verilator) + directed simulation (Icarus) + coverage + SVA + formal (SymbiYosys).
-# Standard job layout (see ../DV_STANDARDS.md): regress (fast gate) → coverage / sva / formal / synth.
+# CI: lint (Verilator) + directed sim (Icarus) + PyUVM-on-cocotb functional tier +
+# functional coverage (cocotb_coverage) + line coverage + bound SVA + formal (SymbiYosys) + synth.
+# Standard job layout (see ../DV_STANDARDS.md): regress (fast gate) → pyuvm / fcov / coverage / sva / formal / synth.
 name: CI
 
 on:
@@ -38,18 +39,37 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y verilator
+          # Pin the cocotb 1.9.x line: its Verilator floor is 4.106 (apt ships
+          # 5.020), whereas cocotb 2.x requires Verilator >= 5.036.
+          pip install "cocotb==1.9.2" "pyuvm==4.0.1"
 
-      - name: Verilator coverage (chi_to_cxl_bridge)
+      - name: Verilator --coverage-line on the pyuvm run
         run: make coverage
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-info
-          path: sim/coverage.info
+          name: coverage-report
+          path: build/coverage/coverage.txt
           if-no-files-found: ignore
 
-  cocotb:
+  pyuvm:
+    needs: regress
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install tools
+        run: |
+          sudo apt-get update && sudo apt-get install -y verilator
+          # cocotb 1.9.x: Verilator floor 4.106 (apt ships 5.020); cocotb 2.x
+          # needs Verilator >= 5.036.
+          pip install "cocotb==1.9.2" "pyuvm==4.0.1"
+
+      - name: PyUVM functional tier (round-trip + random, scoreboard cross-check)
+        run: make pyuvm
+
+  fcov:
     needs: regress
     runs-on: ubuntu-latest
     steps:
@@ -58,17 +78,12 @@ jobs:
       - name: Install tools
         run: |
           sudo apt-get update && sudo apt-get install -y iverilog
-          pip install cocotb==1.8.1 pyvsc
+          # Pinned so the three coexist: cocotb_coverage 1.2.0 supports the
+          # cocotb 1.9.x line, and pyuvm 4.0.1 allows cocotb >=1.6,<3.
+          pip install "cocotb==1.9.2" "cocotb_coverage==1.2.0" "pyuvm==4.0.1"
 
-      - name: cocotb + PyVSC functional coverage (gate 100%)
-        run: make cocotb
-
-      - name: Upload functional coverage DB
-        uses: actions/upload-artifact@v4
-        with:
-          name: functional-coverage-ucis
-          path: verification/cocotb/cov.xml
-          if-no-files-found: ignore
+      - name: Functional coverage (cocotb_coverage, Icarus engine, gate 100%)
+        run: make fcov FCOV_SIM=icarus
 
   sva:
     needs: regress
@@ -78,10 +93,11 @@ jobs:
 
       - name: Install tools
         run: |
-          sudo apt-get update
-          sudo apt-get install -y verilator
+          sudo apt-get update && sudo apt-get install -y verilator
+          # cocotb 1.9.x (Verilator floor 4.106) works with apt's 5.020.
+          pip install "cocotb==1.9.2" "pyuvm==4.0.1"
 
-      - name: Interface SVA (Verilator --assert, all 4 valid/ready ports)
+      - name: Bound SVA (Verilator --assert) under the round-trip run
         run: make sva
 
   formal:

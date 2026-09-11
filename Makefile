@@ -14,11 +14,11 @@ VERILATOR_CPP  := $(VERILATOR_INC)/verilated.cpp $(VERILATOR_INC)/verilated_cov.
 # Core RTL source list — single source of truth (see rtl.f). Verilator runs from
 # the repo root, so the root-relative paths in rtl.f are used verbatim.
 BRIDGE_SRCS := $(shell grep -vE '^[[:space:]]*(#|$$)' rtl.f)
-COV_DIR := sim/obj_dir_cov
+COV_DIR := build/coverage
 # Minimum line-coverage floor enforced by `make coverage` (DV_STANDARDS.md).
 COV_MIN ?= 80
 
-.PHONY: help lint verible-lint verible-format sim regress stress vcd gtkwave vlt-vcd vlt-gtkwave coverage sva formal synth ci cocotb uvm clean
+.PHONY: help lint verible-lint verible-format sim regress stress vcd gtkwave waves wave coverage sva formal synth ci cocotb pyuvm fcov uvm trace-check trace-golden clean
 
 # Verible style-lint / format target the synthesizable RTL (the rtl.f source list).
 VERIBLE_SRCS  := $(BRIDGE_SRCS)
@@ -35,15 +35,16 @@ help:
 	@echo "  make stress    — Icarus simulation with heavy backpressure stress"
 	@echo "  make vcd       — Icarus sim dumping a VCD (verification/directed/build/waves.vcd)"
 	@echo "  make gtkwave   — make vcd, then open the VCD in GTKWave"
-	@echo "  make vlt-vcd   — Verilator --trace build of sim/sim_main.cpp -> sim/obj_dir_vcd/waves.vcd"
-	@echo "  make vlt-gtkwave — make vlt-vcd, then open the Verilator VCD in GTKWave"
 	@echo "  make regress   — lint + sim (fast CI gate)"
-	@echo "  make coverage  — Verilator C++ coverage -> sim/coverage.info (fails below COV_MIN=$(COV_MIN)% lines)"
-	@echo "  make sva       — Verilator --assert: interface SVA on all 4 valid/ready ports"
+	@echo "  make pyuvm     — PyUVM-on-cocotb functional tier (round-trip + random, scoreboard)"
+	@echo "  make fcov      — independent functional coverage (cocotb_coverage, 100%-gated)"
+	@echo "  make coverage  — Verilator --coverage-line on the pyuvm run (fails below COV_MIN=$(COV_MIN)% lines)"
+	@echo "  make sva       — bound SVA checked under the pyuvm run (Verilator --assert)"
+	@echo "  make waves     — FST waveform of a pyuvm run (build/waves/<MODULE>.fst)"
 	@echo "  make formal    — SymbiYosys BMC + cover (credit_counter, reset_drain, async_fifo, bridge top)"
 	@echo "  make synth     — Yosys synthesis smoke (catch latches, area stats)"
-	@echo "  make cocotb    — cocotb OSS UVM-equivalent tests (Icarus VPI)"
-	@echo "  make ci        — regress + coverage + sva + formal + synth (comprehensive)"
+	@echo "  make cocotb    — alias for 'make pyuvm'"
+	@echo "  make ci        — regress + pyuvm + fcov + coverage + sva + formal + synth (comprehensive)"
 	@echo "  make clean     — remove simulation build artifacts"
 	@echo ""
 	@echo "  Subdirectory targets:"
@@ -87,81 +88,74 @@ gtkwave:
 regress: lint sim
 	@echo "[REGRESS] lint + directed sim PASSED"
 
-# cocotb OSS UVM-equivalent tests (Icarus VPI).
-cocotb:
-	$(MAKE) -C verification/cocotb
+# ---- PyUVM-on-cocotb tier (verification/pyuvm) ------------------------------
+# Aligned with ../ucie2-pipe7-bridge/dv/pyuvm. The functional gate, RTL line
+# coverage, bound SVA, and waveforms all ride the same cocotb+Verilator build;
+# only the tier flags differ (RTL_COVERAGE / ASSERT / WAVES).
+PYUVM_DIR := verification/pyuvm
+PYTHON    ?= python3
+RTL_DIR   ?= src
 
-# coverage: Verilator --coverage build + run; emits sim/coverage.info (lcov format).
+# pyuvm: the functional gate — directed CHI<->CXL round-trip + randomized mix,
+# both cross-checked against the Python gold model by the scoreboard.
+pyuvm:
+	$(MAKE) -C $(PYUVM_DIR) MODULE=test_roundtrip
+	$(MAKE) -C $(PYUVM_DIR) MODULE=test_random
+
+# cocotb: back-compat alias for the pyuvm functional tier.
+cocotb: pyuvm
+
+# fcov: independent functional coverage (cocotb_coverage). The test asserts 100%
+# of the loopback-reachable bin set. Runs on Icarus in CI (FCOV_SIM=icarus).
+FCOV_SIM ?= verilator
+fcov:
+	$(MAKE) -C $(PYUVM_DIR) MODULE=test_fcov SIM=$(FCOV_SIM)
+
+# coverage: Verilator --coverage-line on the round-trip run, scored by
+# tools/coverage_report.py (fails below COV_MIN=$(COV_MIN)% RTL lines).
 coverage:
-	@set -e; \
-	command -v $(VERILATOR) >/dev/null 2>&1 || { echo "[COVERAGE] verilator not on PATH; skipping"; exit 0; }; \
-	if [ ! -f sim/sim_main.cpp ]; then \
-		echo "[COVERAGE] sim/sim_main.cpp not present — Verilator C++ coverage harness TODO; skipping"; \
-		exit 0; \
-	fi; \
-	rm -rf $(COV_DIR); \
-	$(VERILATOR) --coverage -cc $(BRIDGE_SRCS) --top-module chi_to_cxl_bridge \
-		--Mdir $(COV_DIR) -Isrc -Wno-DECLFILENAME -Wno-WIDTH -Wno-fatal; \
-	$(MAKE) -C $(COV_DIR) -f Vchi_to_cxl_bridge.mk; \
-	g++ -DVM_COVERAGE=1 -o $(COV_DIR)/sim_cov \
-		sim/sim_main.cpp $(COV_DIR)/Vchi_to_cxl_bridge__ALL.a \
-		-I$(COV_DIR) -I$(VERILATOR_INC) -I$(VERILATOR_INC)/vltstd \
-		$(VERILATOR_CPP) -pthread -lm; \
-	( cd $(COV_DIR) && ./sim_cov ); \
-	if command -v verilator_coverage >/dev/null 2>&1; then \
-		verilator_coverage --write-info sim/coverage.info $(COV_DIR)/coverage.dat; \
-		echo "[COVERAGE] sim/coverage.info written"; \
-		pct=$$(awk -F: '/^DA:/{split($$2,a,","); f++; if(a[2]+0>0) h++} END{printf "%.1f", (f? 100*h/f : 0)}' sim/coverage.info); \
-		echo "[COVERAGE] line coverage: $$pct% (floor $(COV_MIN)%)"; \
-		awk -v p="$$pct" -v m="$(COV_MIN)" 'BEGIN{exit !(p+0 >= m+0)}' || { \
-			echo "[COVERAGE] FAIL: line coverage $$pct% below the $(COV_MIN)% floor"; exit 1; }; \
-		echo "[COVERAGE] PASS: meets the $(COV_MIN)% floor"; \
-	else \
-		echo "[COVERAGE] coverage.dat in $(COV_DIR) (install verilator for lcov export)"; \
-	fi
+	@command -v $(VERILATOR) >/dev/null 2>&1 || { echo "[COVERAGE] verilator not on PATH; skipping"; exit 0; }
+	rm -f $(PYUVM_DIR)/coverage.dat $(PYUVM_DIR)/cov_build/coverage.dat
+	$(MAKE) -C $(PYUVM_DIR) RTL_COVERAGE=1 SIM=verilator MODULE=test_roundtrip
+	@mkdir -p $(COV_DIR)
+	@if   [ -f $(PYUVM_DIR)/coverage.dat ];           then mv -f $(PYUVM_DIR)/coverage.dat           $(COV_DIR)/coverage.dat; \
+	 elif [ -f $(PYUVM_DIR)/cov_build/coverage.dat ]; then mv -f $(PYUVM_DIR)/cov_build/coverage.dat $(COV_DIR)/coverage.dat; \
+	 else echo "[COVERAGE] ERROR: the instrumented run produced no coverage.dat"; exit 1; fi
+	$(PYTHON) tools/coverage_report.py $(COV_DIR)/coverage.dat \
+		--rtl-dir $(RTL_DIR) --report $(COV_DIR)/coverage.txt --min $(COV_MIN)
 
-# sva: bind verification/chi_to_cxl_bridge_sva.sv and run the sim/sim_main.cpp
-# stimulus under Verilator --assert, so the concurrent interface SVA is checked
-# at runtime. A failed property aborts the run. Degrades to a stub if absent.
-SVA_DIR := sim/obj_dir_sva
+# sva: bind verification/uvm/sv/chi_to_cxl_sva.sv and check it under the
+# round-trip run (Verilator --assert). A failed property aborts the run.
 sva:
-	@set -e; \
-	command -v $(VERILATOR) >/dev/null 2>&1 || { echo "[SVA] verilator not on PATH; skipping"; exit 0; }; \
-	rm -rf $(SVA_DIR); \
-	$(VERILATOR) --assert --coverage -cc $(BRIDGE_SRCS) verification/chi_to_cxl_bridge_sva.sv \
-		--top-module chi_to_cxl_bridge --Mdir $(SVA_DIR) -Isrc \
-		-Wno-DECLFILENAME -Wno-WIDTH -Wno-fatal; \
-	$(MAKE) -C $(SVA_DIR) -f Vchi_to_cxl_bridge.mk; \
-	g++ -DVM_COVERAGE=1 -o $(SVA_DIR)/sim_sva \
-		sim/sim_main.cpp $(SVA_DIR)/Vchi_to_cxl_bridge__ALL.a \
-		-I$(SVA_DIR) -I$(VERILATOR_INC) -I$(VERILATOR_INC)/vltstd \
-		$(VERILATOR_CPP) -pthread -lm; \
-	( cd $(SVA_DIR) && ./sim_sva ); \
-	echo "[SVA] interface assertions passed (Verilator --assert, 4 valid/ready ports)"
+	$(MAKE) -C $(PYUVM_DIR) ASSERT=1 SIM=verilator MODULE=test_roundtrip
+	@echo "[SVA] bound-checker properties held during the round-trip run"
 
-# vlt-vcd: Verilator --trace build of the sim/sim_main.cpp stimulus.
-VCD_DIR := sim/obj_dir_vcd
-VLT_VCD := $(VCD_DIR)/waves.vcd
-vlt-vcd:
-	@set -e; \
-	command -v $(VERILATOR) >/dev/null 2>&1 || { echo "[VLT-VCD] verilator not on PATH; skipping"; exit 0; }; \
-	if [ ! -f sim/sim_main.cpp ]; then \
-		echo "[VLT-VCD] sim/sim_main.cpp not present; skipping"; \
-		exit 0; \
-	fi; \
-	rm -rf $(VCD_DIR); \
-	$(VERILATOR) --trace --coverage -cc $(BRIDGE_SRCS) --top-module chi_to_cxl_bridge \
-		--Mdir $(VCD_DIR) -Isrc -Wno-DECLFILENAME -Wno-WIDTH -Wno-fatal; \
-	$(MAKE) -C $(VCD_DIR) -f Vchi_to_cxl_bridge.mk; \
-	g++ -DVM_TRACE=1 -DVM_COVERAGE=1 -o $(VCD_DIR)/sim_vcd \
-		sim/sim_main.cpp $(VCD_DIR)/Vchi_to_cxl_bridge__ALL.a \
-		-I$(VCD_DIR) -I$(VERILATOR_INC) -I$(VERILATOR_INC)/vltstd \
-		$(VERILATOR_CPP) $(VERILATOR_INC)/verilated_vcd_c.cpp -pthread -lm; \
-	( cd $(VCD_DIR) && ./sim_vcd ); \
-	echo "[VLT-VCD] $(VLT_VCD) written"
+# waves: FST waveform of a pyuvm run (Verilator --trace-fst, WAVES=1 build).
+# Opt-in and out of the gate; writes build/waves/<MODULE>.fst.
+WAVE_MODULE ?= test_roundtrip
+WAVE_FST    := build/waves/$(WAVE_MODULE).fst
+waves:
+	$(MAKE) -C $(PYUVM_DIR) WAVES=1 SIM=verilator MODULE=$(WAVE_MODULE)
+	@[ -s $(WAVE_FST) ] && echo "[WAVES] wrote $(WAVE_FST)" || { echo "[WAVES] ERROR: no FST at $(WAVE_FST)"; exit 1; }
 
-vlt-gtkwave: vlt-vcd
-	gtkwave $(VLT_VCD)
+wave: waves
+	gtkwave $(WAVE_FST)
+
+# trace-check: regenerate the canonical smoke trace under Verilator and diff it
+# against the committed golden (verification/pyuvm/golden/bridge.trace), catching
+# any unintended change to the observable per-cycle boundary behaviour
+# (tools/trace_compare.py). Regenerate the golden with `make trace-golden`.
+GOLDEN_TRACE := $(PYUVM_DIR)/golden/bridge.trace
+trace-check:
+	$(MAKE) -C $(PYUVM_DIR) SIM=verilator MODULE=test_smoke >/dev/null
+	$(PYTHON) tools/trace_compare.py \
+		--a $(GOLDEN_TRACE)           --a-label golden \
+		--b $(PYUVM_DIR)/build/bridge.trace --b-label verilator
+
+trace-golden:
+	$(MAKE) -C $(PYUVM_DIR) SIM=verilator MODULE=test_smoke >/dev/null
+	cp $(PYUVM_DIR)/build/bridge.trace $(GOLDEN_TRACE)
+	@echo "[TRACE] golden updated: $(GOLDEN_TRACE)"
 
 # SymbiYosys formal verification (requires OSS CAD Suite or standalone sby).
 formal:
@@ -181,10 +175,11 @@ synth:
 	echo "[SYNTH] PASS: no latches, stat written to sim/synth.log"
 
 # Comprehensive local run.
-ci: regress coverage sva formal synth
-	@echo "[CI] regress + coverage + sva + formal + synth PASSED"
+ci: regress pyuvm fcov coverage sva formal synth
+	@echo "[CI] regress + pyuvm + fcov + coverage + sva + formal + synth PASSED"
 
 clean:
 	$(MAKE) -C verification/directed clean
 	-$(MAKE) -C verification/formal clean
-	rm -rf $(COV_DIR) $(SVA_DIR) $(VCD_DIR) sim/coverage.info sim/synth.log
+	-$(MAKE) -C $(PYUVM_DIR) clean
+	rm -rf $(COV_DIR) build/waves sim/coverage.info sim/synth.log
