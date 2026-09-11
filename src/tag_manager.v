@@ -74,7 +74,7 @@ module tag_manager #(
   // a multi-write FIFO or an arbiter. However, in CHI smoke tests, they are sequential.
   // In a real bridge, we'd use a small arbiter or a wider return path.
   assign free_fifo_wr    = (initializing && !init_cnt[TAG_W]) || release_a_vld || release_b_vld;
-  assign free_fifo_wdata = initializing ? init_cnt[TAG_W-1:0] : 
+  assign free_fifo_wdata = initializing ? init_cnt[TAG_W-1:0] :
                            (release_a_vld ? release_a_tag : release_b_tag);
 
   assign free_fifo_rd    = alloc_vld && alloc_rdy;
