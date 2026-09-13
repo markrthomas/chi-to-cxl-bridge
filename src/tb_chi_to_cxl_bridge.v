@@ -78,6 +78,13 @@ module tb_chi_to_cxl_bridge;
     .chi_comp_data_valid(chi_comp_data_valid),
     .chi_comp_data(chi_comp_data),
     .chi_comp_data_ready(chi_comp_data_ready),
+    // SNP path tied off in the directed TB (exercised by the pyuvm snoop test).
+    .chi_snp_valid(1'b0),
+    .chi_snp_data({CHI_SNP_W{1'b0}}),
+    .chi_snp_ready(),
+    .chi_snp_resp_valid(),
+    .chi_snp_resp_data(),
+    .chi_snp_resp_ready(1'b1),
     .link_up(link_up),
     .err_inj_en(err_inj_en),
     .drain_done(drain_done),

@@ -20,6 +20,11 @@ async def bringup(dut):
     cocotb.start_soon(Clock(dut.cxl_clk, 3, units="ns").start())
     dut.link_up.value = 0
     dut.err_inj_en.value = 0
+    # SNP path idle by default (tests that exercise it drive these).
+    if hasattr(dut, "chi_snp_valid"):
+        dut.chi_snp_valid.value = 0
+        dut.chi_snp_data.value = 0
+        dut.chi_snp_resp_ready.value = 1
     dut.rst_n.value = 0
     await Timer(12, units="ns")
     dut.rst_n.value = 1

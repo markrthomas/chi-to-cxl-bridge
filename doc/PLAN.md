@@ -88,9 +88,16 @@ Implemented and green locally:
       (Phase 3b/3c). Egress qualifier fixed so a write awaiting its data can no
       longer drive a phantom M2S Req (found by the pyuvm scoreboard + guarded by
       the bound SVA).
-- [ ] Add the CHI SNP channel + a minimal snoop-response path (optional, for a
-      coherent HN-side bridge).
-- [ ] Multi-beat data payload transport across the async FIFOs.
+- [x] CHI SNP channel + minimal snoop-response path: a host-side SNP request
+      input and a SnpResp output. The CXL.mem device is memory-only (no cached
+      copy), so the bridge answers every snoop directly with SnpResp, final state
+      Invalid, via a 2-deep skid FIFO (clk-domain only — no CXL crossing). Covered
+      by `test_snoop.py` (gold-checked SnpResp_I, `snp_opcode` covergroup 100%),
+      the bound SVA (`a_snp_resp_stable`, `a_snp_resp_is_snpresp_i`), and the
+      formal SnpResp egress valid/data-stability shadow.
+- [ ] Multi-beat data payload transport across the async FIFOs. (The remaining
+      Phase 3 item; would ripple through the datapath, gold model, and the formal
+      data-width abstraction.)
 
 ## Phase 4 — UVM bench (commercial sim)
 

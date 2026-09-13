@@ -112,6 +112,7 @@ FCOV_SIM ?= verilator
 fcov:
 	$(MAKE) -C $(PYUVM_DIR) MODULE=test_fcov SIM=$(FCOV_SIM)
 	$(MAKE) -C $(PYUVM_DIR) MODULE=test_backpressure SIM=$(FCOV_SIM)
+	$(MAKE) -C $(PYUVM_DIR) MODULE=test_snoop SIM=$(FCOV_SIM)
 
 # coverage: Verilator --coverage-line on the round-trip run, scored by
 # tools/coverage_report.py (fails below COV_MIN=$(COV_MIN)% RTL lines).
@@ -130,7 +131,8 @@ coverage:
 # round-trip run (Verilator --assert). A failed property aborts the run.
 sva:
 	$(MAKE) -C $(PYUVM_DIR) ASSERT=1 SIM=verilator MODULE=test_roundtrip
-	@echo "[SVA] bound-checker properties held during the round-trip run"
+	$(MAKE) -C $(PYUVM_DIR) ASSERT=1 SIM=verilator MODULE=test_snoop
+	@echo "[SVA] bound-checker properties held during the round-trip + snoop runs"
 
 # waves: FST waveform of a pyuvm run (Verilator --trace-fst, WAVES=1 build).
 # Opt-in and out of the gate; writes build/waves/<MODULE>.fst.

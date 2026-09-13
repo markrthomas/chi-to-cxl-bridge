@@ -53,6 +53,9 @@ graph LR
 - **Protocol Translation**: CHI `READ / WRITE / ATOMIC / DATALESS` requests map to
   CXL.mem M2S `MEMRD / MEMRDS / MEMWR / MEMWRPTL / MEMINV` flits; CXL S2M
   `DRS / NDR / DBID` responses map back to CHI `CompData / Comp / DBIDResp`.
+- **Snoop path**: a CHI SNP request channel; since the CXL.mem device is
+  memory-only (no cached copy), the bridge answers every snoop directly with
+  `SnpResp` final state Invalid.
 - **Credit Flow Control**: hardware-enforced credits per class — Posted,
   Non-Posted, Response — derived from async-FIFO write-domain occupancy, so credit
   state is inherently CDC-lossless (no toggle-pulse return path to drop).
@@ -182,7 +185,7 @@ stress), then fans out to parallel jobs that each depend on it:
 | Area | Current Limit |
 |:---|:---|
 | Protocol compliance | The 64-bit packet format is a compact model, not a full CHI or CXL.mem wire encoding (no flit framing, no separate REQ/RSP/DAT/SNP channel widths). |
-| Snoops | The CHI SNP channel and coherency state machine are out of scope; only RN→HN request/response flow is modeled. |
+| Snoops | A minimal CHI SNP path is modeled: the memory-only device answers every snoop `SnpResp` Invalid. A full coherency state machine (tracking cached lines) is out of scope. |
 | Payload data | Header/control fields are modeled; multi-beat data payload transport is not implemented. |
 | Atomics | `ATOMIC` is modeled as a single `MEMINV`-class flit; atomic compare/arithmetic semantics are not executed. |
 | Link training | `link_up` is an external input consumed by the reset-drain FSM; PHY/link training is out of scope. |

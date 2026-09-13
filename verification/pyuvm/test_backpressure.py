@@ -39,7 +39,8 @@ async def _reset(dut):
     for n in ("chi_req_valid", "chi_req_data", "chi_wr_data_valid", "chi_wr_data",
               "cxl_tx_req_ready", "cxl_tx_rwd_ready", "cxl_rx_ndr_valid",
               "cxl_rx_ndr_data", "cxl_rx_drs_valid", "cxl_rx_drs_data",
-              "chi_rsp_ready", "chi_comp_data_ready", "link_up", "err_inj_en"):
+              "chi_rsp_ready", "chi_comp_data_ready", "chi_snp_valid",
+                 "chi_snp_data", "chi_snp_resp_ready", "link_up", "err_inj_en"):
         if hasattr(dut, n):
             getattr(dut, n).value = 0
     dut.rst_n.value = 0

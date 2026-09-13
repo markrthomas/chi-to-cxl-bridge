@@ -29,6 +29,7 @@ loopback, so the honest target is 100% of the set.
 | `bridge.cxl.m2s_memop` | MemRd, MemRdData, MemWr, MemWrPtl | every translated CXL.mem M2S opcode is produced |
 | `bridge.chi.rsp_opcode` | DBIDResp, Comp | both CHI RSP-channel opcodes seen |
 | `bridge.chi.compdata` | seen | a CHI CompData beat is returned on a read |
+| `bridge.chi.snp_opcode` | SnpOnce, SnpShared, SnpUnique | every host snoop opcode is issued (`test_snoop.py`) |
 
 `bridge.cxl.m2s_memop` implicitly covers the opcode sub-decode: ReadNoSnp→MemRd
 vs ReadOnce→MemRdData, and WriteNoSnpPtl→MemWrPtl vs the other writes→MemWr.

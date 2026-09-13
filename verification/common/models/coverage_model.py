@@ -108,6 +108,33 @@ def overall():
     return hit, total, (100.0 * hit / total if total else 0.0)
 
 
+SNP_POINTS = ["bridge.chi.snp_opcode"]
+SNP_OPS = [bm.CHI_SNP_SNPONCE, bm.CHI_SNP_SNPSHARED, bm.CHI_SNP_SNPUNIQUE]
+
+
+@CoverPoint("bridge.chi.snp_opcode", xf=lambda s: s["opcode"], bins=SNP_OPS,
+            bins_labels=["SnpOnce", "SnpShared", "SnpUnique"])
+def sample_snp(s):
+    """s = {opcode} for each accepted CHI snoop request."""
+    pass
+
+
+def per_point_snp():
+    rows = []
+    for name in SNP_POINTS:
+        if name in coverage_db:
+            ci = coverage_db[name]
+            rows.append((name, int(ci.coverage), int(ci.size), float(ci.cover_percentage)))
+    return rows
+
+
+def overall_snp():
+    rows = per_point_snp()
+    hit = sum(r[1] for r in rows)
+    total = sum(r[2] for r in rows)
+    return hit, total, (100.0 * hit / total if total else 0.0)
+
+
 def per_point_bp():
     rows = []
     for name in BP_POINTS:

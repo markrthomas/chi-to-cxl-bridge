@@ -53,6 +53,16 @@ localparam [3:0] CHI_RSP_COMP            = 4'h4;
 localparam [3:0] CHI_RSP_DBIDRESP        = 4'h3;
 localparam [3:0] CHI_RSP_COMPDBIDRESP    = 4'h5;
 
+// CHI SNP opcodes (5b, representative) — host-side snoops of the device.
+localparam [4:0] CHI_SNP_SNPONCE         = 5'h03;
+localparam [4:0] CHI_SNP_SNPSHARED       = 5'h01;
+localparam [4:0] CHI_SNP_SNPUNIQUE       = 5'h07;
+
+// CHI SnpResp opcode (4b) and cache-state Resp (3b, reuses CHI_CACHE_*).
+// A CXL.mem device is memory-only (holds no cached copy), so every snoop is
+// answered SnpResp with final state Invalid — the minimal snoop path.
+localparam [3:0] CHI_RSP_SNPRESP         = 4'h1;
+
 // CHI DAT opcodes (4b)
 localparam [3:0] CHI_DAT_COMPDATA        = 4'h4;
 localparam [3:0] CHI_DAT_NCBWRDATA       = 4'h3;
@@ -218,6 +228,34 @@ localparam integer CXL_DRS_METAVAL_LSB = CXL_DRS_TAG_LSB     + CXL_DRS_TAG_W;
 localparam integer CXL_DRS_METAFLD_LSB = CXL_DRS_METAVAL_LSB + CXL_DRS_METAVAL_W;
 localparam integer CXL_DRS_OPCODE_LSB  = CXL_DRS_METAFLD_LSB + CXL_DRS_METAFLD_W;
 localparam integer CXL_DRS_W           = CXL_DRS_OPCODE_LSB  + CXL_DRS_OPCODE_W;  // 526
+
+// ======================== CHI SNP flit field map ========================
+// Host-side snoop request into the bridge. {SrcID, Opcode, TxnID, Addr}
+localparam integer CHI_SNP_ADDR_W   = CHI_CXL_ADDR_W;
+localparam integer CHI_SNP_TXNID_W  = TXNID_W;
+localparam integer CHI_SNP_OPCODE_W = 5;
+localparam integer CHI_SNP_SRCID_W  = NODEID_W;
+
+localparam integer CHI_SNP_ADDR_LSB   = 0;
+localparam integer CHI_SNP_TXNID_LSB  = CHI_SNP_ADDR_LSB   + CHI_SNP_ADDR_W;
+localparam integer CHI_SNP_OPCODE_LSB = CHI_SNP_TXNID_LSB  + CHI_SNP_TXNID_W;
+localparam integer CHI_SNP_SRCID_LSB  = CHI_SNP_OPCODE_LSB + CHI_SNP_OPCODE_W;
+localparam integer CHI_SNP_W          = CHI_SNP_SRCID_LSB  + CHI_SNP_SRCID_W;  // 68
+
+// ======================== CHI SnpResp flit field map ========================
+// Snoop response out of the bridge. {SrcID, Opcode, TxnID, Resp(cache state), RespErr}
+localparam integer CHI_SNPRSP_RESPERR_W = 2;
+localparam integer CHI_SNPRSP_RESP_W    = 3;
+localparam integer CHI_SNPRSP_TXNID_W   = TXNID_W;
+localparam integer CHI_SNPRSP_OPCODE_W  = 4;
+localparam integer CHI_SNPRSP_SRCID_W   = NODEID_W;
+
+localparam integer CHI_SNPRSP_RESPERR_LSB = 0;
+localparam integer CHI_SNPRSP_RESP_LSB    = CHI_SNPRSP_RESPERR_LSB + CHI_SNPRSP_RESPERR_W;
+localparam integer CHI_SNPRSP_TXNID_LSB   = CHI_SNPRSP_RESP_LSB    + CHI_SNPRSP_RESP_W;
+localparam integer CHI_SNPRSP_OPCODE_LSB  = CHI_SNPRSP_TXNID_LSB   + CHI_SNPRSP_TXNID_W;
+localparam integer CHI_SNPRSP_SRCID_LSB   = CHI_SNPRSP_OPCODE_LSB  + CHI_SNPRSP_OPCODE_W;
+localparam integer CHI_SNPRSP_W           = CHI_SNPRSP_SRCID_LSB   + CHI_SNPRSP_SRCID_W;  // 24
 
 // ---- Classification helpers ----
 // True for CHI REQ opcodes that are writes (carry a WrData phase).

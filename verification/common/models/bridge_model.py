@@ -57,6 +57,18 @@ CXL_DRS = {
 }
 CXL_DRS_W = 526
 
+# CHI SNP request in / SnpResp out (host-side snoop path).
+CHI_SNP = {
+    "ADDR": (0, 48), "TXNID": (48, 8), "OPCODE": (56, 5), "SRCID": (61, 7),
+}
+CHI_SNP_W = 68
+
+CHI_SNPRSP = {
+    "RESPERR": (0, 2), "RESP": (2, 3), "TXNID": (5, 8), "OPCODE": (13, 4),
+    "SRCID": (17, 7),
+}
+CHI_SNPRSP_W = 24
+
 # ============================ opcodes / codes ================================
 CHI_REQ_READNOSNP = 0x04
 CHI_REQ_READONCE = 0x03
@@ -67,6 +79,12 @@ CHI_REQ_WRITEUNIQUEFULL = 0x19
 CHI_RSP_COMP = 0x4
 CHI_RSP_DBIDRESP = 0x3
 CHI_RSP_COMPDBIDRESP = 0x5
+
+CHI_SNP_SNPONCE = 0x03
+CHI_SNP_SNPSHARED = 0x01
+CHI_SNP_SNPUNIQUE = 0x07
+CHI_RSP_SNPRESP = 0x1
+CHI_CACHE_I = 0x0  # final snoop state: Invalid (memory-only device)
 
 CHI_DAT_COMPDATA = 0x4
 CHI_DAT_NCBWRDATA = 0x3
@@ -164,6 +182,10 @@ def make_chi_req(opcode, addr, txnid, srcid=0, size=6):
 
 def make_chi_wr_data(data, be=_BE_ALL, poison=0):
     return pack(CHI_DAT, data=data, be=be, poison=poison, opcode=CHI_DAT_NCBWRDATA)
+
+
+def make_chi_snp(opcode, addr, txnid, srcid=0):
+    return pack(CHI_SNP, opcode=opcode, addr=addr, txnid=txnid, srcid=srcid)
 
 
 def make_cxl_ndr(tag, opcode=CXL_NDR_CMP):
