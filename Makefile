@@ -37,7 +37,7 @@ help:
 	@echo "  make gtkwave   — make vcd, then open the VCD in GTKWave"
 	@echo "  make regress   — lint + sim (fast CI gate)"
 	@echo "  make pyuvm     — PyUVM-on-cocotb functional tier (round-trip + random, scoreboard)"
-	@echo "  make fcov      — independent functional coverage (cocotb_coverage, 100%-gated)"
+	@echo "  make fcov      — functional + backpressure coverage (cocotb_coverage, 100%-gated)"
 	@echo "  make coverage  — Verilator --coverage-line on the pyuvm run (fails below COV_MIN=$(COV_MIN)% lines)"
 	@echo "  make sva       — bound SVA checked under the pyuvm run (Verilator --assert)"
 	@echo "  make waves     — FST waveform of a pyuvm run (build/waves/<MODULE>.fst)"
@@ -105,11 +105,13 @@ pyuvm:
 # cocotb: back-compat alias for the pyuvm functional tier.
 cocotb: pyuvm
 
-# fcov: independent functional coverage (cocotb_coverage). The test asserts 100%
-# of the loopback-reachable bin set. Runs on Icarus in CI (FCOV_SIM=icarus).
+# fcov: independent functional coverage (cocotb_coverage). Each test asserts 100%
+# of its bin set. test_fcov = REQ/MemOpcode/RSP/CompData; test_backpressure =
+# the stall / near-full / FIFO-occupancy covergroup. Runs on Icarus in CI.
 FCOV_SIM ?= verilator
 fcov:
 	$(MAKE) -C $(PYUVM_DIR) MODULE=test_fcov SIM=$(FCOV_SIM)
+	$(MAKE) -C $(PYUVM_DIR) MODULE=test_backpressure SIM=$(FCOV_SIM)
 
 # coverage: Verilator --coverage-line on the round-trip run, scored by
 # tools/coverage_report.py (fails below COV_MIN=$(COV_MIN)% RTL lines).

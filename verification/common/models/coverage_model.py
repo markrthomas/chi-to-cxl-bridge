@@ -60,6 +60,37 @@ def sample_compdata(s):
     pass
 
 
+# ---- backpressure / FIFO-occupancy covergroup (PLAN Phase 2 gap) ------------
+# Kept in a SEPARATE point set (BP_POINTS) with its own overall_bp(), so the
+# functional 100% gate (make fcov) is unaffected: these bins need the dedicated
+# stall stimulus in test_backpressure.py. Each is a boolean "condition occurred"
+# bin over an observable stall/near-full event.
+BP_POINTS = [
+    "bridge.bp.req_stall", "bridge.bp.wrdata_stall",
+    "bridge.bp.tx_req_stall", "bridge.bp.tx_rwd_stall",
+    "bridge.bp.ndr_stall", "bridge.bp.drs_stall",
+    "bridge.bp.req_fifo_full",
+]
+
+
+@CoverPoint("bridge.bp.req_stall", xf=lambda s: s["req_stall"], bins=[1])
+@CoverPoint("bridge.bp.wrdata_stall", xf=lambda s: s["wrdata_stall"], bins=[1])
+@CoverPoint("bridge.bp.tx_req_stall", xf=lambda s: s["tx_req_stall"], bins=[1])
+@CoverPoint("bridge.bp.tx_rwd_stall", xf=lambda s: s["tx_rwd_stall"], bins=[1])
+@CoverPoint("bridge.bp.ndr_stall", xf=lambda s: s["ndr_stall"], bins=[1])
+@CoverPoint("bridge.bp.drs_stall", xf=lambda s: s["drs_stall"], bins=[1])
+@CoverPoint("bridge.bp.req_fifo_full", xf=lambda s: s["req_fifo_full"], bins=[1])
+def sample_bp(s):
+    """One per-cycle sample of the backpressure conditions; pass 1 for each that
+    holds this cycle (0 otherwise). Bins fire on the first occurrence of each.
+
+    Keys: req_stall (chi_req_valid & !chi_req_ready), wrdata_stall,
+    tx_req_stall / tx_rwd_stall (M2S egress stalled by the link),
+    ndr_stall / drs_stall (S2M ingress stalled by a full response FIFO),
+    req_fifo_full (a request FIFO reached its credit/depth limit)."""
+    pass
+
+
 # ---- aggregation / reporting (mirrors the reference API) --------------------
 def per_point():
     rows = []
@@ -72,6 +103,22 @@ def per_point():
 
 def overall():
     rows = per_point()
+    hit = sum(r[1] for r in rows)
+    total = sum(r[2] for r in rows)
+    return hit, total, (100.0 * hit / total if total else 0.0)
+
+
+def per_point_bp():
+    rows = []
+    for name in BP_POINTS:
+        if name in coverage_db:
+            ci = coverage_db[name]
+            rows.append((name, int(ci.coverage), int(ci.size), float(ci.cover_percentage)))
+    return rows
+
+
+def overall_bp():
+    rows = per_point_bp()
     hit = sum(r[1] for r in rows)
     total = sum(r[2] for r in rows)
     return hit, total, (100.0 * hit / total if total else 0.0)

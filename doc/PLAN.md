@@ -72,8 +72,9 @@ Implemented and green locally:
       the loopback-reachable set. See [coverage-plan.md](coverage-plan.md).
       (Replaces the earlier PyVSC bench, which the structured-flit refactor and a
       missing `pyvsc` dependency had left dead.)
-- [ ] Add a backpressure / FIFO-occupancy covergroup (req/rsp stall depth,
-      near-full credit states) — exercised today but not yet a gated covergroup.
+- [x] Backpressure / FIFO-occupancy covergroup (`test_backpressure.py` +
+      `coverage_model.BP_POINTS`): 7 stall / near-full / credit-exhaustion bins,
+      driven by dedicated stall stimulus, 100%-gated under `make fcov`.
 - [ ] Constrained-random stimulus with per-transaction randomization objects for
       closed-loop coverage-driven generation.
 
