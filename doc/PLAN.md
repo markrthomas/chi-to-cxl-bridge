@@ -112,15 +112,16 @@ Implemented and green locally:
       which fetches the Accellera UVM fixture from a Verilator sparse checkout)
       and `run` (`--binary`, gated on `UVM_HOME`). The env **elaborates clean**
       with OSS Verilator 5.047.
-- [ ] `make run` (`--binary`) is heavy and belongs on a large runner (its UVM
-      build strains the local ~6 GB host), so it is out of the OSS gate — matching
-      the reference's convention. It builds and runs, but the run-time scoreboard
-      cross-check is **not yet green**: the CXL responder / response monitor drop
-      the first M2S beat and see no CompData/Comp, a sampling-timing issue against
-      the first-word-fall-through FIFOs that needs waveform debug on a runner with
-      the headroom to iterate. The elaborate gate (`uvm-lint`) is the verified
-      deliverable; closing the `run` cross-check + commercial-sim (Xcelium/VCS)
-      reuse are the remaining Phase 4 work.
+- [x] `make run` (`--binary`) **passes**: the scoreboard reports
+      "PASS: 7 requests round-trip + translation OK" (0 UVM_ERROR). Getting there
+      needed two testbench fixes: (a) the S2M responder drives valid and HOLDS it
+      across clock edges until ready is sampled (an earlier set-valid-and-pop in
+      one delta collapsed the beat so the bridge never saw it); and (b) stimulus
+      waits for bring-up (tag-pool init + bridge-open) before the first request,
+      so it is not stalled with an unstable `chi_req_ready` during reset. The run
+      is heavy (UVM PCH build), so it stays OUT of the OSS CI gate — the
+      `uvm-lint` elaborate is the gate; `run` is a large-runner / local check.
+- [ ] Commercial-sim (Xcelium/VCS) reuse of the same SV sources — later.
 
 ## Notes
 
