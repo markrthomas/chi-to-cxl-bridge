@@ -169,6 +169,7 @@ stress), then fans out to parallel jobs that each depend on it:
 | `fcov` | `make fcov FCOV_SIM=icarus` | cocotb_coverage functional coverage; gates at 100% |
 | `coverage` | `make coverage` | enforces 80% line floor; uploads `coverage.txt` |
 | `sva` | `make sva` | bound SVA under Verilator `--assert` |
+| `uvm-lint` | `make -C verification/uvm/vlt lint UVM_HOME=…` | elaborate the SV-UVM env (fetches the UVM fixture); RAM-safe |
 | `formal` | `make formal` | SymbiYosys (pinned OSS CAD Suite) |
 | `synth` | `make synth` | Yosys latch / area smoke |
 | `verible` | `make verible-lint` | **advisory** style-lint (`continue-on-error`) |
@@ -178,6 +179,7 @@ stress), then fans out to parallel jobs that each depend on it:
 - **Design Specification**: [doc/design-spec.md](doc/design-spec.md) — architecture, opcode mapping, packet format, FSM, and verification stack.
 - **Coverage Plan**: [doc/coverage-plan.md](doc/coverage-plan.md) — code / functional / formal coverage levels and the functional model.
 - **PyUVM tier**: [verification/pyuvm/](verification/pyuvm/) — env, agent, sequences, and tests (aligned with `../ucie2-pipe7-bridge/dv/pyuvm`).
+- **SV-UVM tier**: [verification/uvm/](verification/uvm/) — a SystemVerilog UVM env on the `chi_to_cxl_if` bundle (`make -C verification/uvm/vlt lint UVM_HOME=…`); elaborates on OSS Verilator, `--binary` run on a large runner.
 - **Plan**: [doc/PLAN.md](doc/PLAN.md) — current state and phased roadmap.
 
 ## Known Limits

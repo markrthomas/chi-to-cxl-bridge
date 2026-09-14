@@ -18,7 +18,7 @@ COV_DIR := build/coverage
 # Minimum line-coverage floor enforced by `make coverage` (DV_STANDARDS.md).
 COV_MIN ?= 80
 
-.PHONY: help lint verible-lint verible-format sim regress stress vcd gtkwave waves wave coverage sva formal synth ci cocotb pyuvm fcov uvm trace-check trace-golden clean
+.PHONY: help lint verible-lint verible-format sim regress stress vcd gtkwave waves wave coverage sva formal synth ci cocotb pyuvm fcov uvm uvm-lint trace-check trace-golden clean
 
 # Verible style-lint / format target the synthesizable RTL (the rtl.f source list).
 VERIBLE_SRCS  := $(BRIDGE_SRCS)
@@ -40,6 +40,7 @@ help:
 	@echo "  make fcov      — functional + backpressure coverage (cocotb_coverage, 100%-gated)"
 	@echo "  make coverage  — Verilator --coverage-line on the pyuvm run (fails below COV_MIN=$(COV_MIN)% lines)"
 	@echo "  make sva       — bound SVA checked under the pyuvm run (Verilator --assert)"
+	@echo "  make uvm-lint  — elaborate the SV-UVM env (needs UVM_HOME; verification/uvm/vlt)"
 	@echo "  make waves     — FST waveform of a pyuvm run (build/waves/<MODULE>.fst)"
 	@echo "  make formal    — SymbiYosys BMC + cover (credit_counter, reset_drain, async_fifo, bridge top)"
 	@echo "  make synth     — Yosys synthesis smoke (catch latches, area stats)"
@@ -126,6 +127,12 @@ coverage:
 	 else echo "[COVERAGE] ERROR: the instrumented run produced no coverage.dat"; exit 1; fi
 	$(PYTHON) tools/coverage_report.py $(COV_DIR)/coverage.dat \
 		--rtl-dir $(RTL_DIR) --report $(COV_DIR)/coverage.txt --min $(COV_MIN)
+
+# uvm-lint: elaborate the SV-UVM env (verification/uvm/vlt) — RAM-safe gate.
+# Needs UVM_HOME (Accellera UVM fixture); see verification/uvm/vlt/Makefile.
+# The heavier --binary run is `make -C verification/uvm/vlt run` (big runner).
+uvm-lint:
+	$(MAKE) -C verification/uvm/vlt lint
 
 # sva: bind verification/uvm/sv/chi_to_cxl_sva.sv and check it under the
 # round-trip run (Verilator --assert). A failed property aborts the run.

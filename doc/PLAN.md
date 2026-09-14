@@ -99,10 +99,28 @@ Implemented and green locally:
       Phase 3 item; would ripple through the datapath, gold model, and the formal
       data-width abstraction.)
 
-## Phase 4 — UVM bench (commercial sim)
+## Phase 4 — SV-UVM bench
 
-- [ ] Optional `verification/uvm/` (Xcelium) scoreboard + functional coverage,
-      kept out of the OSS CI gate, matching the workspace convention.
+- [x] `verification/uvm/sv/`: a single-package SV-UVM env
+      (`chi_to_cxl_uvm_pkg.sv`) on the `chi_to_cxl_if` bundle — CHI driver
+      (req + DBIDResp-gated WrData), CXL responder (M2S accept + S2M DRS/NDR),
+      response monitor, and a scoreboard doing the same round-trip + translation
+      cross-check as the pyuvm tier, plus the bound SVA under `--assert`. Driven
+      by `chi_roundtrip_test` from `tb_chi_to_cxl.sv`.
+- [x] `verification/uvm/vlt/Makefile` (aligned with the reference): `lint`
+      elaborate-only (RAM-safe, ~280 MB — runs locally + in the `uvm-lint` CI job,
+      which fetches the Accellera UVM fixture from a Verilator sparse checkout)
+      and `run` (`--binary`, gated on `UVM_HOME`). The env **elaborates clean**
+      with OSS Verilator 5.047.
+- [ ] `make run` (`--binary`) is heavy and belongs on a large runner (its UVM
+      build strains the local ~6 GB host), so it is out of the OSS gate — matching
+      the reference's convention. It builds and runs, but the run-time scoreboard
+      cross-check is **not yet green**: the CXL responder / response monitor drop
+      the first M2S beat and see no CompData/Comp, a sampling-timing issue against
+      the first-word-fall-through FIFOs that needs waveform debug on a runner with
+      the headroom to iterate. The elaborate gate (`uvm-lint`) is the verified
+      deliverable; closing the `run` cross-check + commercial-sim (Xcelium/VCS)
+      reuse are the remaining Phase 4 work.
 
 ## Notes
 
