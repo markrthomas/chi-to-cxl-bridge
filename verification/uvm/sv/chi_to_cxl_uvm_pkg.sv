@@ -74,36 +74,46 @@ package chi_to_cxl_uvm_pkg;
       while (!dbid_by_txn.exists(txnid)) @(posedge vif.clk);
     endtask
 
-    task automatic capture();
+    // Ready-gated capture: the response FIFOs are first-word-fall-through, so a
+    // beat consumed with ready held high is presented and popped on the same edge
+    // -- ephemeral, and a post-edge read misses/shifts it. Instead hold ready low,
+    // sample the HELD beat at #0.1, then pulse ready one cycle to pop it, so every
+    // beat is observed exactly once (models a realistic backpressuring consumer).
+    // The two channel loops are forked individually by the test (no nested fork).
+    task automatic cap_rsp();     // CHI RSP channel (DBIDResp / Comp)
       bit [CHI_RSP_OPCODE_W-1:0] op;
       bit [TXNID_W-1:0]          txn;
-      vif.chi_rsp_ready = 1'b1;
-      vif.chi_comp_data_ready = 1'b1;
-      // Sample DUT outputs AT the clock edge (pre-update): the response FIFOs are
-      // first-word-fall-through and are popped this same edge (ready held high),
-      // so a post-edge (#0.1) read would see the already-advanced/emptied FIFO and
-      // miss the beat. Reading at the edge captures the beat being consumed.
-      fork
-        forever begin
-          @(posedge vif.clk);
-          if (vif.chi_rsp_valid && vif.chi_rsp_ready) begin
-            op  = vif.chi_rsp_data[CHI_RSP_OPCODE_LSB +: CHI_RSP_OPCODE_W];
-            txn = vif.chi_rsp_data[CHI_RSP_TXNID_LSB  +: TXNID_W];
-            if (op == CHI_RSP_DBIDRESP)
-              dbid_by_txn[txn] = vif.chi_rsp_data[CHI_RSP_DBID_LSB +: TAG_W];
-            else if (op == CHI_RSP_COMP)
-              comp_ap.write(txn);
-          end
+      vif.chi_rsp_ready = 1'b0;
+      forever begin
+        @(posedge vif.clk); #0.1;
+        if (vif.chi_rsp_valid) begin
+          op  = vif.chi_rsp_data[CHI_RSP_OPCODE_LSB +: CHI_RSP_OPCODE_W];
+          txn = vif.chi_rsp_data[CHI_RSP_TXNID_LSB  +: TXNID_W];
+          if (op == CHI_RSP_DBIDRESP)
+            dbid_by_txn[txn] = vif.chi_rsp_data[CHI_RSP_DBID_LSB +: TAG_W];
+          else if (op == CHI_RSP_COMP)
+            comp_ap.write(txn);
+          vif.chi_rsp_ready = 1'b1;
+          @(posedge vif.clk); #0.1;
+          vif.chi_rsp_ready = 1'b0;
         end
-        forever begin
-          @(posedge vif.clk);
-          if (vif.chi_comp_data_valid && vif.chi_comp_data_ready)
-            // pack {8'b0, txnid[7:0], addr_lo[47:0]}
-            compdata_ap.write({8'b0,
-                               vif.chi_comp_data[CHI_DAT_TXNID_LSB +: TXNID_W],
-                               vif.chi_comp_data[CHI_DAT_DATA_LSB  +: 48]});
+      end
+    endtask
+
+    task automatic cap_compdata();  // CHI CompData channel (read return)
+      vif.chi_comp_data_ready = 1'b0;
+      forever begin
+        @(posedge vif.clk); #0.1;
+        if (vif.chi_comp_data_valid) begin
+          // pack {8'b0, txnid[7:0], addr_lo[47:0]}
+          compdata_ap.write({8'b0,
+                             vif.chi_comp_data[CHI_DAT_TXNID_LSB +: TXNID_W],
+                             vif.chi_comp_data[CHI_DAT_DATA_LSB  +: 48]});
+          vif.chi_comp_data_ready = 1'b1;
+          @(posedge vif.clk); #0.1;
+          vif.chi_comp_data_ready = 1'b0;
         end
-      join
+      end
     endtask
   endclass
 
@@ -211,63 +221,82 @@ package chi_to_cxl_uvm_pkg;
         `uvm_fatal("NOVIF", "vif not set")
     endfunction
 
-    task automatic accept();
+    // Ready-gated M2S accept (see chi_rsp_monitor::capture): the M2S FIFOs are
+    // FWFT, so hold ready low, sample the held flit at #0.1, then pulse ready to
+    // pop it -- one clean capture per flit, no same-edge FWFT race. Req and RwD
+    // are independent channels, so each has its own gated loop.
+    task automatic accept_req();  // M2S Req (reads) -- ready-gated
       bit [TAG_W-1:0] tag;
-      bit [47:0]      raddr, waddr;
-      vif.cxl_tx_req_ready = 1'b1;
-      vif.cxl_tx_rwd_ready = 1'b1;
-      // Sample AT the edge (pre-update): the M2S FIFOs are FWFT and pop this same
-      // edge (ready held high), so a post-edge read would see the next flit.
+      bit [47:0]      raddr;
+      vif.cxl_tx_req_ready = 1'b0;
       forever begin
-        @(posedge vif.cxl_clk);
-        if (vif.cxl_tx_req_valid && vif.cxl_tx_req_ready) begin
+        @(posedge vif.cxl_clk); #0.1;
+        if (vif.cxl_tx_req_valid) begin
           tag   = vif.cxl_tx_req_data[CXL_REQ_TAG_LSB  +: TAG_W];
           raddr = vif.cxl_tx_req_data[CXL_REQ_ADDR_LSB +: CXL_REQ_ADDR_W];
           // pack {12'b0, memop[3:0], addr[47:0]}
           m2s_req_ap.write({12'b0, vif.cxl_tx_req_data[CXL_REQ_MEMOP_LSB +: CXL_REQ_MEMOP_W], raddr});
           drs_tag_q.push_back(tag);
           drs_addr_q.push_back(raddr);
-        end
-        if (vif.cxl_tx_rwd_valid && vif.cxl_tx_rwd_ready) begin
-          waddr = vif.cxl_tx_rwd_data[CXL_RWD_ADDR_LSB +: CXL_RWD_ADDR_W];
-          m2s_rwd_ap.write({12'b0, vif.cxl_tx_rwd_data[CXL_RWD_MEMOP_LSB +: CXL_RWD_MEMOP_W], waddr});
-          ndr_tag_q.push_back(vif.cxl_tx_rwd_data[CXL_RWD_TAG_LSB +: TAG_W]);
+          vif.cxl_tx_req_ready = 1'b1;
+          @(posedge vif.cxl_clk); #0.1;
+          vif.cxl_tx_req_ready = 1'b0;
         end
       end
     endtask
 
-    task automatic respond();
+    task automatic accept_rwd();  // M2S RwD (writes) -- ready-gated
+      bit [47:0] waddr;
+      vif.cxl_tx_rwd_ready = 1'b0;
+      forever begin
+        @(posedge vif.cxl_clk); #0.1;
+        if (vif.cxl_tx_rwd_valid) begin
+          waddr = vif.cxl_tx_rwd_data[CXL_RWD_ADDR_LSB +: CXL_RWD_ADDR_W];
+          m2s_rwd_ap.write({12'b0, vif.cxl_tx_rwd_data[CXL_RWD_MEMOP_LSB +: CXL_RWD_MEMOP_W], waddr});
+          ndr_tag_q.push_back(vif.cxl_tx_rwd_data[CXL_RWD_TAG_LSB +: TAG_W]);
+          vif.cxl_tx_rwd_ready = 1'b1;
+          @(posedge vif.cxl_clk); #0.1;
+          vif.cxl_tx_rwd_ready = 1'b0;
+        end
+      end
+    endtask
+
+    // Proper valid/ready driver handshake: assert valid+data and HOLD across
+    // clock edges until the bridge samples ready=1, THEN deassert and pop. (An
+    // earlier set-valid-and-check-ready in one #0.1 delta collapsed the beat --
+    // valid was 1 then 0 within a delta, so the bridge, which samples at the
+    // posedge, never saw it and never wrote its response FIFO.)
+    task automatic drive_drs();   // S2M DRS(MemData) for each captured read
       vif.cxl_rx_drs_valid = 1'b0;
+      forever begin
+        @(posedge vif.cxl_clk); #0.1;
+        if (drs_tag_q.size() != 0) begin
+          vif.cxl_rx_drs_data = '0;
+          vif.cxl_rx_drs_data[CXL_DRS_OPCODE_LSB +: CXL_DRS_OPCODE_W] = CXL_DRS_MEMDATA;
+          vif.cxl_rx_drs_data[CXL_DRS_TAG_LSB    +: CXL_DRS_TAG_W]    = drs_tag_q[0];
+          vif.cxl_rx_drs_data[CXL_DRS_DATA_LSB   +: 48]              = drs_addr_q[0];
+          vif.cxl_rx_drs_valid = 1'b1;
+          do begin @(posedge vif.cxl_clk); #0.1; end while (!vif.cxl_rx_drs_ready);
+          vif.cxl_rx_drs_valid = 1'b0;
+          void'(drs_tag_q.pop_front()); void'(drs_addr_q.pop_front());
+        end
+      end
+    endtask
+
+    task automatic drive_ndr();   // S2M NDR(Cmp) for each captured write
       vif.cxl_rx_ndr_valid = 1'b0;
-      fork
-        forever begin
-          @(posedge vif.cxl_clk); #0.1;
-          if (drs_tag_q.size() != 0 && !vif.cxl_rx_drs_valid) begin
-            vif.cxl_rx_drs_data = '0;
-            vif.cxl_rx_drs_data[CXL_DRS_OPCODE_LSB +: CXL_DRS_OPCODE_W] = CXL_DRS_MEMDATA;
-            vif.cxl_rx_drs_data[CXL_DRS_TAG_LSB    +: CXL_DRS_TAG_W]    = drs_tag_q[0];
-            vif.cxl_rx_drs_data[CXL_DRS_DATA_LSB   +: 48]              = drs_addr_q[0];
-            vif.cxl_rx_drs_valid = 1'b1;
-          end
-          if (vif.cxl_rx_drs_valid && vif.cxl_rx_drs_ready) begin
-            void'(drs_tag_q.pop_front()); void'(drs_addr_q.pop_front());
-            vif.cxl_rx_drs_valid = 1'b0;
-          end
+      forever begin
+        @(posedge vif.cxl_clk); #0.1;
+        if (ndr_tag_q.size() != 0) begin
+          vif.cxl_rx_ndr_data = '0;
+          vif.cxl_rx_ndr_data[CXL_NDR_OPCODE_LSB +: CXL_NDR_OPCODE_W] = CXL_NDR_CMP;
+          vif.cxl_rx_ndr_data[CXL_NDR_TAG_LSB    +: CXL_NDR_TAG_W]    = ndr_tag_q[0];
+          vif.cxl_rx_ndr_valid = 1'b1;
+          do begin @(posedge vif.cxl_clk); #0.1; end while (!vif.cxl_rx_ndr_ready);
+          vif.cxl_rx_ndr_valid = 1'b0;
+          void'(ndr_tag_q.pop_front());
         end
-        forever begin
-          @(posedge vif.cxl_clk); #0.1;
-          if (ndr_tag_q.size() != 0 && !vif.cxl_rx_ndr_valid) begin
-            vif.cxl_rx_ndr_data = '0;
-            vif.cxl_rx_ndr_data[CXL_NDR_OPCODE_LSB +: CXL_NDR_OPCODE_W] = CXL_NDR_CMP;
-            vif.cxl_rx_ndr_data[CXL_NDR_TAG_LSB    +: CXL_NDR_TAG_W]    = ndr_tag_q[0];
-            vif.cxl_rx_ndr_valid = 1'b1;
-          end
-          if (vif.cxl_rx_ndr_valid && vif.cxl_rx_ndr_ready) begin
-            void'(ndr_tag_q.pop_front());
-            vif.cxl_rx_ndr_valid = 1'b0;
-          end
-        end
-      join
+      end
     endtask
   endclass
 
@@ -425,12 +454,19 @@ package chi_to_cxl_uvm_pkg;
       vif.chi_snp_valid = 0; vif.chi_snp_data = '0; vif.chi_snp_resp_ready = 1;
       vif.err_inj_en = 0;
       wait (vif.rst_n === 1'b1);
-      repeat (4) @(posedge vif.clk);
+      // Wait for the bridge to finish bring-up before any stimulus: the tag pool
+      // takes 2**TAG_W (=16) cycles to initialise and the reset-drain FSM must
+      // open. Driving during that window leaves the first request stalled with an
+      // unstable chi_req_ready, scrambling its ingress/egress ordering.
+      repeat (32) @(posedge vif.clk);
 
       fork
-        env.rsp_mon.capture();
-        env.responder.accept();
-        env.responder.respond();
+        env.rsp_mon.cap_rsp();
+        env.rsp_mon.cap_compdata();
+        env.responder.accept_req();
+        env.responder.accept_rwd();
+        env.responder.drive_drs();
+        env.responder.drive_ndr();
         env.driver.drive();
       join_none
 
