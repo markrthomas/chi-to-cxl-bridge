@@ -150,10 +150,11 @@ jobs:
       - name: Yosys synthesis smoke (no inferred latches)
         run: make synth
 
-  # Advisory SystemVerilog style-lint (Verible). Non-blocking.
+  # SystemVerilog style-lint (Verible), now a real gate: a ruleset
+  # (verification/verible_lint.rules) waives the documented intentional
+  # house-style deviations, so every other rule is enforced.
   verible:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v5
 

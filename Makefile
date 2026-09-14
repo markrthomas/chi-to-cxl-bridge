@@ -24,12 +24,15 @@ COV_MIN ?= 80
 VERIBLE_SRCS  := $(BRIDGE_SRCS)
 VERIBLE_LINT  ?= verible-verilog-lint
 VERIBLE_FMT   ?= verible-verilog-format
+# Ruleset: disables the documented, intentional house-style deviations (dense
+# FORMAL/defs lines, proven byte-identical infra); every other rule stays a gate.
+VERIBLE_RULES := verification/verible_lint.rules
 
 help:
 	@echo "chi_to_cxl_bridge — common targets"
 	@echo ""
 	@echo "  make lint      — Verilator --lint-only on all RTL modules"
-	@echo "  make verible-lint   — Verible SystemVerilog style-lint (advisory)"
+	@echo "  make verible-lint   — Verible SystemVerilog style-lint (gate; ruleset waives house-style)"
 	@echo "  make verible-format — Verible auto-format the RTL in place (opt-in, local)"
 	@echo "  make sim       — Icarus directed simulation (smoke + scoreboard)"
 	@echo "  make stress    — Icarus simulation with heavy backpressure stress"
@@ -60,7 +63,7 @@ lint:
 verible-lint:
 	@set -e; \
 	command -v $(VERIBLE_LINT) >/dev/null 2>&1 || { echo "[VERIBLE] $(VERIBLE_LINT) not on PATH; skipping (install from chipsalliance/verible)"; exit 0; }; \
-	$(VERIBLE_LINT) $(VERIBLE_SRCS); \
+	$(VERIBLE_LINT) --rules_config $(VERIBLE_RULES) $(VERIBLE_SRCS); \
 	echo "[VERIBLE] style-lint clean ($(words $(VERIBLE_SRCS)) files)"
 
 # Verible auto-format, rewriting the RTL in place. OPT-IN / LOCAL ONLY.

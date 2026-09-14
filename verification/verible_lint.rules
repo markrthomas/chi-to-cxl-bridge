@@ -1,0 +1,23 @@
+# Verible style-lint ruleset for chi_to_cxl_bridge (passed via --rules_config).
+#
+# The rules below are DISABLED as documented, intentional house-style deviations
+# — not defects. Every other Verible rule stays enabled, so `make verible-lint`
+# is a real style gate for the rest. Rationale per rule:
+#
+#   line-length            Dense single-line FORMAL assertions, the packed-flit
+#                          field tables in chi_to_cxl_bridge_defs.vh, and the
+#                          translate_* functions are deliberately wide.
+#   always-comb            The infra modules (async_fifo, reset_drain, ...) use
+#                          `always @(*)` and are byte-identical to the proven
+#                          cxl_lpddr5x_bridge copies — see doc/PLAN.md Notes; they
+#                          must not diverge, so this is not reformatted.
+#   explicit-parameter-storage-type / parameter-name-style /
+#   unpacked-dimensions-range-ordering
+#                          Same proven-infra constraint (localparam masks/counts,
+#                          `mem[0:DEPTH-1]` memories), plus the defs field-offset
+#                          localparams; kept in the workspace's established style.
+-line-length
+-always-comb
+-explicit-parameter-storage-type
+-parameter-name-style
+-unpacked-dimensions-range-ordering

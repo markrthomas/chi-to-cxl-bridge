@@ -172,7 +172,7 @@ stress), then fans out to parallel jobs that each depend on it:
 | `uvm-lint` | `make -C verification/uvm/vlt lint UVM_HOME=…` | elaborate the SV-UVM env (fetches the UVM fixture); RAM-safe |
 | `formal` | `make formal` | SymbiYosys (pinned OSS CAD Suite) |
 | `synth` | `make synth` | Yosys latch / area smoke |
-| `verible` | `make verible-lint` | **advisory** style-lint (`continue-on-error`) |
+| `verible` | `make verible-lint` | style-lint gate (ruleset waives documented house-style deviations) |
 
 ## Documentation
 
