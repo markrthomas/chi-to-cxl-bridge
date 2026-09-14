@@ -94,11 +94,37 @@ jobs:
       - name: Install tools
         run: |
           sudo apt-get update && sudo apt-get install -y verilator
-          # cocotb 1.9.x (Verilator floor 4.106) works with apt's 5.020.
-          pip install "cocotb==1.9.2" "pyuvm==4.0.1"
+          # cocotb 1.9.x (Verilator floor 4.106) works with apt's 5.020;
+          # cocotb_coverage is needed because `make sva` also runs test_snoop.
+          pip install "cocotb==1.9.2" "cocotb_coverage==1.2.0" "pyuvm==4.0.1"
 
-      - name: Bound SVA (Verilator --assert) under the round-trip run
+      - name: Bound SVA (Verilator --assert) under the round-trip + snoop runs
         run: make sva
+
+  # SV-UVM tier: elaborate-only (RAM-safe, ~280 MB). The full --binary `run`
+  # builds a UVM precompiled header that can exceed ~8 GB, so it is NOT part of
+  # this gate — it belongs on a large runner (verification/uvm/vlt `make run`).
+  # Needs a UVM-capable Verilator (>= 5.036); apt ships 5.020, so use the pinned
+  # OSS CAD Suite Verilator (as the formal/synth jobs do).
+  uvm-lint:
+    needs: regress
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: YosysHQ/setup-oss-cad-suite@v4
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          version: ${{ env.OSS_CAD_SUITE_VERSION }}
+
+      - name: Fetch the Accellera UVM fixture (Verilator test_regress/t/uvm)
+        run: |
+          git clone --depth 1 --filter=blob:none --sparse \
+            https://github.com/verilator/verilator.git /tmp/vlt_uvm
+          ( cd /tmp/vlt_uvm && git sparse-checkout set test_regress/t )
+
+      - name: Elaborate the SV-UVM env
+        run: make -C verification/uvm/vlt lint UVM_HOME=/tmp/vlt_uvm/test_regress/t/uvm
 
   formal:
     needs: regress
@@ -128,10 +154,11 @@ jobs:
       - name: Yosys synthesis smoke (no inferred latches)
         run: make synth
 
-  # Advisory SystemVerilog style-lint (Verible). Non-blocking.
+  # SystemVerilog style-lint (Verible), now a real gate: a ruleset
+  # (verification/verible_lint.rules) waives the documented intentional
+  # house-style deviations, so every other rule is enforced.
   verible:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v5
 

@@ -1,0 +1,25 @@
+[tasks]
+bmc
+cover
+prove
+
+[options]
+bmc: mode bmc
+bmc: depth 24
+cover: mode cover
+cover: depth 24
+prove: mode prove
+prove: depth 24
+# sync_fifo is single-clock: no `multiclock on` (it would let k-induction leave
+# clk un-ticked, so the @(posedge clk) occupancy assert wouldn't constrain the
+# seed and induction would spuriously fail).
+
+[engines]
+smtbmc
+
+[script]
+# FIFO_FORMAL_STANDALONE turns the occupancy invariant into an ASSERT (proven
+# k-inductive here) and enables the reachability covers; the integrated bridge
+# proof ASSUMES the same invariant (assume-guarantee). See src/sync_fifo.v.
+read_verilog -sv -DFORMAL -DFIFO_FORMAL_STANDALONE ../../../../src/sync_fifo.v
+prep -top sync_fifo

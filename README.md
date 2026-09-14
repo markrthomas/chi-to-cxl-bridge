@@ -53,6 +53,9 @@ graph LR
 - **Protocol Translation**: CHI `READ / WRITE / ATOMIC / DATALESS` requests map to
   CXL.mem M2S `MEMRD / MEMRDS / MEMWR / MEMWRPTL / MEMINV` flits; CXL S2M
   `DRS / NDR / DBID` responses map back to CHI `CompData / Comp / DBIDResp`.
+- **Snoop path**: a CHI SNP request channel; since the CXL.mem device is
+  memory-only (no cached copy), the bridge answers every snoop directly with
+  `SnpResp` final state Invalid.
 - **Credit Flow Control**: hardware-enforced credits per class — Posted,
   Non-Posted, Response — derived from async-FIFO write-domain occupancy, so credit
   state is inherently CDC-lossless (no toggle-pulse return path to drop).
@@ -166,15 +169,17 @@ stress), then fans out to parallel jobs that each depend on it:
 | `fcov` | `make fcov FCOV_SIM=icarus` | cocotb_coverage functional coverage; gates at 100% |
 | `coverage` | `make coverage` | enforces 80% line floor; uploads `coverage.txt` |
 | `sva` | `make sva` | bound SVA under Verilator `--assert` |
+| `uvm-lint` | `make -C verification/uvm/vlt lint UVM_HOME=…` | elaborate the SV-UVM env (fetches the UVM fixture); RAM-safe |
 | `formal` | `make formal` | SymbiYosys (pinned OSS CAD Suite) |
 | `synth` | `make synth` | Yosys latch / area smoke |
-| `verible` | `make verible-lint` | **advisory** style-lint (`continue-on-error`) |
+| `verible` | `make verible-lint` | style-lint gate (ruleset waives documented house-style deviations) |
 
 ## Documentation
 
 - **Design Specification**: [doc/design-spec.md](doc/design-spec.md) — architecture, opcode mapping, packet format, FSM, and verification stack.
 - **Coverage Plan**: [doc/coverage-plan.md](doc/coverage-plan.md) — code / functional / formal coverage levels and the functional model.
 - **PyUVM tier**: [verification/pyuvm/](verification/pyuvm/) — env, agent, sequences, and tests (aligned with `../ucie2-pipe7-bridge/dv/pyuvm`).
+- **SV-UVM tier**: [verification/uvm/](verification/uvm/) — a SystemVerilog UVM env on the `chi_to_cxl_if` bundle (`make -C verification/uvm/vlt lint UVM_HOME=…`); elaborates on OSS Verilator, `--binary` run on a large runner.
 - **Plan**: [doc/PLAN.md](doc/PLAN.md) — current state and phased roadmap.
 
 ## Known Limits
@@ -182,7 +187,7 @@ stress), then fans out to parallel jobs that each depend on it:
 | Area | Current Limit |
 |:---|:---|
 | Protocol compliance | The 64-bit packet format is a compact model, not a full CHI or CXL.mem wire encoding (no flit framing, no separate REQ/RSP/DAT/SNP channel widths). |
-| Snoops | The CHI SNP channel and coherency state machine are out of scope; only RN→HN request/response flow is modeled. |
+| Snoops | A minimal CHI SNP path is modeled: the memory-only device answers every snoop `SnpResp` Invalid. A full coherency state machine (tracking cached lines) is out of scope. |
 | Payload data | Header/control fields are modeled; multi-beat data payload transport is not implemented. |
 | Atomics | `ATOMIC` is modeled as a single `MEMINV`-class flit; atomic compare/arithmetic semantics are not executed. |
 | Link training | `link_up` is an external input consumed by the reset-drain FSM; PHY/link training is out of scope. |

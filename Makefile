@@ -18,18 +18,21 @@ COV_DIR := build/coverage
 # Minimum line-coverage floor enforced by `make coverage` (DV_STANDARDS.md).
 COV_MIN ?= 80
 
-.PHONY: help lint verible-lint verible-format sim regress stress vcd gtkwave waves wave coverage sva formal synth ci cocotb pyuvm fcov uvm trace-check trace-golden clean
+.PHONY: help lint verible-lint verible-format sim regress stress vcd gtkwave waves wave coverage sva formal synth ci cocotb pyuvm fcov uvm uvm-lint trace-check trace-golden clean
 
 # Verible style-lint / format target the synthesizable RTL (the rtl.f source list).
 VERIBLE_SRCS  := $(BRIDGE_SRCS)
 VERIBLE_LINT  ?= verible-verilog-lint
 VERIBLE_FMT   ?= verible-verilog-format
+# Ruleset: disables the documented, intentional house-style deviations (dense
+# FORMAL/defs lines, proven byte-identical infra); every other rule stays a gate.
+VERIBLE_RULES := verification/verible_lint.rules
 
 help:
 	@echo "chi_to_cxl_bridge — common targets"
 	@echo ""
 	@echo "  make lint      — Verilator --lint-only on all RTL modules"
-	@echo "  make verible-lint   — Verible SystemVerilog style-lint (advisory)"
+	@echo "  make verible-lint   — Verible SystemVerilog style-lint (gate; ruleset waives house-style)"
 	@echo "  make verible-format — Verible auto-format the RTL in place (opt-in, local)"
 	@echo "  make sim       — Icarus directed simulation (smoke + scoreboard)"
 	@echo "  make stress    — Icarus simulation with heavy backpressure stress"
@@ -37,9 +40,10 @@ help:
 	@echo "  make gtkwave   — make vcd, then open the VCD in GTKWave"
 	@echo "  make regress   — lint + sim (fast CI gate)"
 	@echo "  make pyuvm     — PyUVM-on-cocotb functional tier (round-trip + random, scoreboard)"
-	@echo "  make fcov      — independent functional coverage (cocotb_coverage, 100%-gated)"
+	@echo "  make fcov      — functional + backpressure coverage (cocotb_coverage, 100%-gated)"
 	@echo "  make coverage  — Verilator --coverage-line on the pyuvm run (fails below COV_MIN=$(COV_MIN)% lines)"
 	@echo "  make sva       — bound SVA checked under the pyuvm run (Verilator --assert)"
+	@echo "  make uvm-lint  — elaborate the SV-UVM env (needs UVM_HOME; verification/uvm/vlt)"
 	@echo "  make waves     — FST waveform of a pyuvm run (build/waves/<MODULE>.fst)"
 	@echo "  make formal    — SymbiYosys BMC + cover (credit_counter, reset_drain, async_fifo, bridge top)"
 	@echo "  make synth     — Yosys synthesis smoke (catch latches, area stats)"
@@ -59,7 +63,7 @@ lint:
 verible-lint:
 	@set -e; \
 	command -v $(VERIBLE_LINT) >/dev/null 2>&1 || { echo "[VERIBLE] $(VERIBLE_LINT) not on PATH; skipping (install from chipsalliance/verible)"; exit 0; }; \
-	$(VERIBLE_LINT) $(VERIBLE_SRCS); \
+	$(VERIBLE_LINT) --rules_config $(VERIBLE_RULES) $(VERIBLE_SRCS); \
 	echo "[VERIBLE] style-lint clean ($(words $(VERIBLE_SRCS)) files)"
 
 # Verible auto-format, rewriting the RTL in place. OPT-IN / LOCAL ONLY.
@@ -105,11 +109,14 @@ pyuvm:
 # cocotb: back-compat alias for the pyuvm functional tier.
 cocotb: pyuvm
 
-# fcov: independent functional coverage (cocotb_coverage). The test asserts 100%
-# of the loopback-reachable bin set. Runs on Icarus in CI (FCOV_SIM=icarus).
+# fcov: independent functional coverage (cocotb_coverage). Each test asserts 100%
+# of its bin set. test_fcov = REQ/MemOpcode/RSP/CompData; test_backpressure =
+# the stall / near-full / FIFO-occupancy covergroup. Runs on Icarus in CI.
 FCOV_SIM ?= verilator
 fcov:
 	$(MAKE) -C $(PYUVM_DIR) MODULE=test_fcov SIM=$(FCOV_SIM)
+	$(MAKE) -C $(PYUVM_DIR) MODULE=test_backpressure SIM=$(FCOV_SIM)
+	$(MAKE) -C $(PYUVM_DIR) MODULE=test_snoop SIM=$(FCOV_SIM)
 
 # coverage: Verilator --coverage-line on the round-trip run, scored by
 # tools/coverage_report.py (fails below COV_MIN=$(COV_MIN)% RTL lines).
@@ -124,11 +131,18 @@ coverage:
 	$(PYTHON) tools/coverage_report.py $(COV_DIR)/coverage.dat \
 		--rtl-dir $(RTL_DIR) --report $(COV_DIR)/coverage.txt --min $(COV_MIN)
 
+# uvm-lint: elaborate the SV-UVM env (verification/uvm/vlt) — RAM-safe gate.
+# Needs UVM_HOME (Accellera UVM fixture); see verification/uvm/vlt/Makefile.
+# The heavier --binary run is `make -C verification/uvm/vlt run` (big runner).
+uvm-lint:
+	$(MAKE) -C verification/uvm/vlt lint
+
 # sva: bind verification/uvm/sv/chi_to_cxl_sva.sv and check it under the
 # round-trip run (Verilator --assert). A failed property aborts the run.
 sva:
 	$(MAKE) -C $(PYUVM_DIR) ASSERT=1 SIM=verilator MODULE=test_roundtrip
-	@echo "[SVA] bound-checker properties held during the round-trip run"
+	$(MAKE) -C $(PYUVM_DIR) ASSERT=1 SIM=verilator MODULE=test_snoop
+	@echo "[SVA] bound-checker properties held during the round-trip + snoop runs"
 
 # waves: FST waveform of a pyuvm run (Verilator --trace-fst, WAVES=1 build).
 # Opt-in and out of the gate; writes build/waves/<MODULE>.fst.

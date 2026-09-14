@@ -25,9 +25,11 @@ Implemented and green locally:
 - [x] `make sva` — bound SVA checker (`verification/uvm/sv/chi_to_cxl_sva.sv`)
       verified under the pyuvm round-trip (Verilator `--assert`): M2S/CHI
       handshake stability, RSP legal-opcode, and the no-phantom-Req guard. PASS.
-- [x] `make formal` — SymbiYosys: `credit_counter`, `reset_drain`, `async_fifo`
-      proven (bmc + cover + unbounded `prove`/k-induction); `chi_to_cxl_bridge`
-      top checked (bmc depth 24 + cover).
+- [x] `make formal` — SymbiYosys: `credit_counter`, `reset_drain`, `async_fifo`,
+      `sync_fifo` proven (bmc + cover + unbounded `prove`/k-induction); the
+      `chi_to_cxl_bridge` top now also closes an unbounded `prove` (bmc depth 24 +
+      cover + k-induction), using a data-width abstraction (`FORMAL_SMALL_DATA`)
+      so the wide-datapath SMT proof is tractable.
 - [x] `make pyuvm` / `make fcov` — PyUVM-on-cocotb tier aligned with
       `../ucie2-pipe7-bridge/dv/pyuvm`: env + scoreboard cross-checking round-trip
       identity and request translation against the Python gold model
@@ -37,15 +39,28 @@ Implemented and green locally:
 - [x] CI workflow (`.github/workflows/ci.yml`): regress / pyuvm / fcov / coverage
       / sva / formal / synth / verible(advisory).
 
-## Phase 1 — close formal on the bridge top
+## Phase 1 — close formal on the bridge top  ✅
 
-- [ ] Port the shadow-register + assume-guarantee composition used in
-      `cxl_lpddr5x_bridge.sby` so the integrated `chi_to_cxl_bridge` top closes an
-      unbounded `prove` (currently bmc + cover only). The FORMAL block in
-      `chi_to_cxl_bridge.v` already mirrors the proven egress-stability and
-      arbiter-lock invariants; the FIFO occupancy guarantee is discharged by the
-      standalone `async_fifo` `prove`.
-- [ ] Add per-module `prove` task to `chi_to_cxl_bridge.sby` and gate it in CI.
+- [x] The integrated `chi_to_cxl_bridge` top closes an unbounded `prove`
+      (k-induction), added as a `prove` task in `chi_to_cxl_bridge.sby`.
+      Getting there required three changes:
+  - **Decouple the M2S egress arbiter.** CXL.mem Req (reads) and RwD (writes) are
+    independent message classes, but a legacy shared arbiter (`arb_locked_r` /
+    `arb_sel_*`) coupled them. It made egress-Req `valid` depend on `arb_sel_final`
+    (and, transiently, on FIFO *contents*), which both allowed a phantom Req and
+    was not k-inductive. Each channel now presents its own source FIFO head
+    (`valid = source non-empty`), so a stalled beat is never popped and holds
+    stable — the reference's proven structure. This also removed the phantom-Req
+    class of bug at the source (superseding the earlier qualifier patch).
+  - **`sync_fifo` assume-guarantee** (mirrors `async_fifo`): occupancy invariant
+    ASSERTED + proven k-inductive standalone (`sync_fifo.sby`, `-DFIFO_FORMAL_STANDALONE`),
+    ASSUMED in integration.
+  - **Data-width abstraction** (`FORMAL_SMALL_DATA`): the properties are
+    width-independent, so the bridge `.sby` shrinks the 512-bit beat to keep the
+    unbounded SMT proof within memory; sim / coverage / SVA / synth keep 512.
+- [x] `prove` gated in CI via the `formal` job (runs the full `make formal`).
+- [ ] Full-width unbounded `prove` (no data abstraction) if a higher-memory
+      runner / FIFO-memory abstraction is set up — currently sim covers full width.
 
 ## Phase 2 — functional coverage (now PyUVM-on-cocotb)
 
@@ -57,8 +72,9 @@ Implemented and green locally:
       the loopback-reachable set. See [coverage-plan.md](coverage-plan.md).
       (Replaces the earlier PyVSC bench, which the structured-flit refactor and a
       missing `pyvsc` dependency had left dead.)
-- [ ] Add a backpressure / FIFO-occupancy covergroup (req/rsp stall depth,
-      near-full credit states) — exercised today but not yet a gated covergroup.
+- [x] Backpressure / FIFO-occupancy covergroup (`test_backpressure.py` +
+      `coverage_model.BP_POINTS`): 7 stall / near-full / credit-exhaustion bins,
+      driven by dedicated stall stimulus, 100%-gated under `make fcov`.
 - [ ] Constrained-random stimulus with per-transaction randomization objects for
       closed-loop coverage-driven generation.
 
@@ -72,14 +88,39 @@ Implemented and green locally:
       (Phase 3b/3c). Egress qualifier fixed so a write awaiting its data can no
       longer drive a phantom M2S Req (found by the pyuvm scoreboard + guarded by
       the bound SVA).
-- [ ] Add the CHI SNP channel + a minimal snoop-response path (optional, for a
-      coherent HN-side bridge).
-- [ ] Multi-beat data payload transport across the async FIFOs.
+- [x] CHI SNP channel + minimal snoop-response path: a host-side SNP request
+      input and a SnpResp output. The CXL.mem device is memory-only (no cached
+      copy), so the bridge answers every snoop directly with SnpResp, final state
+      Invalid, via a 2-deep skid FIFO (clk-domain only — no CXL crossing). Covered
+      by `test_snoop.py` (gold-checked SnpResp_I, `snp_opcode` covergroup 100%),
+      the bound SVA (`a_snp_resp_stable`, `a_snp_resp_is_snpresp_i`), and the
+      formal SnpResp egress valid/data-stability shadow.
+- [ ] Multi-beat data payload transport across the async FIFOs. (The remaining
+      Phase 3 item; would ripple through the datapath, gold model, and the formal
+      data-width abstraction.)
 
-## Phase 4 — UVM bench (commercial sim)
+## Phase 4 — SV-UVM bench
 
-- [ ] Optional `verification/uvm/` (Xcelium) scoreboard + functional coverage,
-      kept out of the OSS CI gate, matching the workspace convention.
+- [x] `verification/uvm/sv/`: a single-package SV-UVM env
+      (`chi_to_cxl_uvm_pkg.sv`) on the `chi_to_cxl_if` bundle — CHI driver
+      (req + DBIDResp-gated WrData), CXL responder (M2S accept + S2M DRS/NDR),
+      response monitor, and a scoreboard doing the same round-trip + translation
+      cross-check as the pyuvm tier, plus the bound SVA under `--assert`. Driven
+      by `chi_roundtrip_test` from `tb_chi_to_cxl.sv`.
+- [x] `verification/uvm/vlt/Makefile` (aligned with the reference): `lint`
+      elaborate-only (RAM-safe, ~280 MB — runs locally + in the `uvm-lint` CI job,
+      which fetches the Accellera UVM fixture from a Verilator sparse checkout)
+      and `run` (`--binary`, gated on `UVM_HOME`). The env **elaborates clean**
+      with OSS Verilator 5.047.
+- [ ] `make run` (`--binary`) is heavy and belongs on a large runner (its UVM
+      build strains the local ~6 GB host), so it is out of the OSS gate — matching
+      the reference's convention. It builds and runs, but the run-time scoreboard
+      cross-check is **not yet green**: the CXL responder / response monitor drop
+      the first M2S beat and see no CompData/Comp, a sampling-timing issue against
+      the first-word-fall-through FIFOs that needs waveform debug on a runner with
+      the headroom to iterate. The elaborate gate (`uvm-lint`) is the verified
+      deliverable; closing the `run` cross-check + commercial-sim (Xcelium/VCS)
+      reuse are the remaining Phase 4 work.
 
 ## Notes
 

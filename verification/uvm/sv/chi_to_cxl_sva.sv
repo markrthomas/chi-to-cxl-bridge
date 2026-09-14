@@ -43,7 +43,11 @@ module chi_to_cxl_sva (
   input wire                 chi_rsp_ready,
   input wire                 chi_comp_data_valid,
   input wire [CHI_DAT_W-1:0] chi_comp_data,
-  input wire                 chi_comp_data_ready
+  input wire                 chi_comp_data_ready,
+  // CHI SnpResp egress (clk)
+  input wire                    chi_snp_resp_valid,
+  input wire [CHI_SNPRSP_W-1:0] chi_snp_resp_data,
+  input wire                    chi_snp_resp_ready
 );
 
   // ===========================================================================
@@ -104,6 +108,27 @@ module chi_to_cxl_sva (
   ) else $error("[SVA] illegal CHI RSP opcode=%h",
                 chi_rsp_data[CHI_RSP_OPCODE_LSB +: CHI_RSP_OPCODE_W]);
 
+  // ===========================================================================
+  // P7 -- SnpResp egress. The memory-only device answers every snoop with
+  // SnpResp, final state Invalid; the response channel is a well-formed
+  // valid/ready stream.
+  // ===========================================================================
+  a_snp_resp_stable: assert property (
+    @(posedge clk) disable iff (!rst_n)
+      (chi_snp_resp_valid && !chi_snp_resp_ready) |=>
+        (chi_snp_resp_valid && $stable(chi_snp_resp_data))
+  ) else $error("[SVA] chi_snp_resp flit changed/dropped while stalled");
+
+  a_snp_resp_is_snpresp_i: assert property (
+    @(posedge clk) disable iff (!rst_n)
+      chi_snp_resp_valid |->
+        (chi_snp_resp_data[CHI_SNPRSP_OPCODE_LSB +: CHI_SNPRSP_OPCODE_W] == CHI_RSP_SNPRESP &&
+         chi_snp_resp_data[CHI_SNPRSP_RESP_LSB   +: CHI_SNPRSP_RESP_W]   == CHI_CACHE_I    &&
+         chi_snp_resp_data[CHI_SNPRSP_RESPERR_LSB +: CHI_SNPRSP_RESPERR_W] == CHI_RESPERR_OK)
+  ) else $error("[SVA] SnpResp not SnpResp_I/OK: op=%h resp=%h",
+                chi_snp_resp_data[CHI_SNPRSP_OPCODE_LSB +: CHI_SNPRSP_OPCODE_W],
+                chi_snp_resp_data[CHI_SNPRSP_RESP_LSB +: CHI_SNPRSP_RESP_W]);
+
 endmodule : chi_to_cxl_sva
 /* verilator lint_on SYNCASYNCNET */
 
@@ -118,7 +143,9 @@ bind chi_to_cxl_bridge chi_to_cxl_sva u_sva (
   .chi_rsp_valid(chi_rsp_valid), .chi_rsp_data(chi_rsp_data),
   .chi_rsp_ready(chi_rsp_ready),
   .chi_comp_data_valid(chi_comp_data_valid), .chi_comp_data(chi_comp_data),
-  .chi_comp_data_ready(chi_comp_data_ready)
+  .chi_comp_data_ready(chi_comp_data_ready),
+  .chi_snp_resp_valid(chi_snp_resp_valid), .chi_snp_resp_data(chi_snp_resp_data),
+  .chi_snp_resp_ready(chi_snp_resp_ready)
 );
 
 `default_nettype wire

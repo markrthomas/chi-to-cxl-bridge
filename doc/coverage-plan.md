@@ -29,9 +29,26 @@ loopback, so the honest target is 100% of the set.
 | `bridge.cxl.m2s_memop` | MemRd, MemRdData, MemWr, MemWrPtl | every translated CXL.mem M2S opcode is produced |
 | `bridge.chi.rsp_opcode` | DBIDResp, Comp | both CHI RSP-channel opcodes seen |
 | `bridge.chi.compdata` | seen | a CHI CompData beat is returned on a read |
+| `bridge.chi.snp_opcode` | SnpOnce, SnpShared, SnpUnique | every host snoop opcode is issued (`test_snoop.py`) |
 
 `bridge.cxl.m2s_memop` implicitly covers the opcode sub-decode: ReadNoSnp→MemRd
 vs ReadOnce→MemRdData, and WriteNoSnpPtl→MemWrPtl vs the other writes→MemWr.
+
+### Backpressure / FIFO-occupancy covergroup (`make fcov`, `test_backpressure.py`)
+
+A separate covergroup (`BP_POINTS`, its own 100% gate so it does not perturb the
+functional set) driven by the dedicated stall stimulus. Each bin fires on the
+first occurrence of an observable backpressure condition:
+
+| Coverpoint | Condition |
+|:---|:---|
+| `bridge.bp.req_stall` | `chi_req_valid & !chi_req_ready` (credit/FIFO full) |
+| `bridge.bp.wrdata_stall` | `chi_wr_data_valid & !chi_wr_data_ready` (write-data FIFO full) |
+| `bridge.bp.tx_req_stall` | M2S Req presented but the link is not ready |
+| `bridge.bp.tx_rwd_stall` | M2S RwD presented but the link is not ready |
+| `bridge.bp.ndr_stall` | S2M NDR held off by a full response FIFO |
+| `bridge.bp.drs_stall` | S2M DRS held off by a full response FIFO |
+| `bridge.bp.req_fifo_full` | a request FIFO reached its credit/depth limit |
 
 ## Round-trip / translation cross-check (PyUVM scoreboard)
 
@@ -64,8 +81,6 @@ egress qualifier fix.
 
 ## Not yet modeled (roadmap — see PLAN.md)
 
-- Backpressure / FIFO-occupancy coverage (req/rsp stall depth, near-full credit
-  states) — exercised functionally but not yet a gated covergroup.
 - Clock-ratio coverage in the pyuvm tier (kept at 2:3 here; ratios are covered by
   the directed TB and the async_fifo proof).
 - Error-injection / RespErr paths — the structured-flit CRC integrity path is not

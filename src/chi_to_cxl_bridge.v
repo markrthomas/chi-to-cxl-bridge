@@ -56,6 +56,16 @@ module chi_to_cxl_bridge #(
   output wire [CHI_DAT_W-1:0]  chi_comp_data,
   input  wire                  chi_comp_data_ready,
 
+  // CHI SNP request in / SnpResp out (clk domain). The CXL.mem device holds no
+  // cached copy, so the bridge answers every snoop directly with SnpResp_I.
+  input  wire                  chi_snp_valid,
+  input  wire [CHI_SNP_W-1:0]  chi_snp_data,
+  output wire                  chi_snp_ready,
+
+  output wire                  chi_snp_resp_valid,
+  output wire [CHI_SNPRSP_W-1:0] chi_snp_resp_data,
+  input  wire                  chi_snp_resp_ready,
+
   // Link readiness and error injection
   input  wire                  link_up,
   // err_inj_en drove the compact-packet CRC integrity path; the structured-flit
@@ -171,6 +181,21 @@ module chi_to_cxl_bridge #(
       translate_cxl_drs_to_chi = chi_dat;
     end
   endfunction
+
+  // --- Translation: CHI SNP -> CHI SnpResp (memory-only device -> Invalid) ---
+  function automatic [CHI_SNPRSP_W-1:0] translate_snp_to_resp;
+    input [CHI_SNP_W-1:0] chi_snp;
+    reg [CHI_SNPRSP_W-1:0] snprsp;
+    begin
+      snprsp[CHI_SNPRSP_RESPERR_LSB +: CHI_SNPRSP_RESPERR_W] = CHI_RESPERR_OK;
+      snprsp[CHI_SNPRSP_RESP_LSB    +: CHI_SNPRSP_RESP_W]    = CHI_CACHE_I;  // no cached copy
+      snprsp[CHI_SNPRSP_TXNID_LSB   +: CHI_SNPRSP_TXNID_W]   = chi_snp[CHI_SNP_TXNID_LSB +: CHI_SNP_TXNID_W];
+      snprsp[CHI_SNPRSP_OPCODE_LSB  +: CHI_SNPRSP_OPCODE_W]  = CHI_RSP_SNPRESP;
+      // Route the response back to the snoop's source.
+      snprsp[CHI_SNPRSP_SRCID_LSB   +: CHI_SNPRSP_SRCID_W]   = chi_snp[CHI_SNP_SRCID_LSB +: CHI_SNP_SRCID_W];
+      translate_snp_to_resp = snprsp;
+    end
+  endfunction
   /* verilator lint_on UNUSEDSIGNAL */
 
   // --- Internal signals & state ---
@@ -181,6 +206,7 @@ module chi_to_cxl_bridge #(
   wire rsp_ndr_w_full, rsp_ndr_r_empty;
   wire rsp_int_w_full, rsp_int_r_empty;
   wire rsp_drs_w_full, rsp_drs_r_empty;
+  wire snp_fifo_full, snp_fifo_empty;
 
   wire [CHI_REQ_W-1:0] req_posted_rd_data;
   wire [CHI_REQ_W-1:0] req_np_rd_data;
@@ -202,7 +228,7 @@ module chi_to_cxl_bridge #(
     .clk(clk), .rst_n(clk_rst_n), .d(req_np_r_empty), .q(req_np_r_empty_clk)
   );
 
-  wire all_empty = req_posted_r_empty_clk && req_np_r_empty_clk && rsp_ndr_r_empty && rsp_int_r_empty && rsp_drs_r_empty && req_dat_r_empty;
+  wire all_empty = req_posted_r_empty_clk && req_np_r_empty_clk && rsp_ndr_r_empty && rsp_int_r_empty && rsp_drs_r_empty && req_dat_r_empty && snp_fifo_empty;
   wire bridge_open;
   reset_drain u_reset_drain (
     .clk(clk), .rst_n(clk_rst_n), .link_up(link_up_clk), .all_empty(all_empty), .open(bridge_open), .drain_done(drain_done)
@@ -258,6 +284,18 @@ module chi_to_cxl_bridge #(
 
   assign chi_rsp_valid = !rsp_ndr_r_empty || !rsp_int_r_empty;
 
+  // --- CHI SNP -> SnpResp path (clk domain, answered directly as Invalid) ---
+  // A 2-deep skid FIFO holds the generated SnpResp so the snoop channel has
+  // simple valid/ready backpressure without stalling combinationally.
+  wire snp_accept = chi_snp_valid && chi_snp_ready;
+  assign chi_snp_ready = bridge_open && !snp_fifo_full;
+  sync_fifo #(.WIDTH(CHI_SNPRSP_W), .DEPTH(2)) u_snp_resp (
+    .clk(clk), .rst_n(clk_rst_n), .wr_en(snp_accept), .wr_data(translate_snp_to_resp(chi_snp_data)),
+    .full(snp_fifo_full), .empty(snp_fifo_empty),
+    .rd_en(chi_snp_resp_valid && chi_snp_resp_ready), .rd_data(chi_snp_resp_data)
+  );
+  assign chi_snp_resp_valid = !snp_fifo_empty;
+
   wire [TXNID_W-1:0] release_a_txnid, release_b_txnid;
   // SrcID recovery is tracked by the tag manager but the current CHI response
   // flit model does not carry a TgtID field to route it back into, so the
@@ -297,43 +335,32 @@ module chi_to_cxl_bridge #(
     chi_req_data[CHI_REQ_TXNID_LSB - 1 : 0]
   };
 
-  reg arb_locked_r, arb_sel_posted_r;
-  wire arb_posted_ready = !req_posted_r_empty && !req_dat_r_empty;
-  wire arb_sel_now = arb_posted_ready;
-  wire arb_sel_final = arb_locked_r ? arb_sel_posted_r : arb_sel_now;
-  wire [CHI_REQ_W-1:0] arb_rd_data = arb_sel_final ? req_posted_rd_data : req_np_rd_data;
-  wire [TAG_W-1:0] txn_tag = arb_rd_data[CHI_REQ_TXNID_LSB +: TAG_W];
+  // --- CXL M2S egress: independent Req (reads) and RwD (writes) channels ---
+  // CXL.mem M2S Req and RwD are separate message classes with independent
+  // valid/ready, so the two egress streams are decoupled (no shared arbiter):
+  //   * Req  presents the head of the np FIFO (reads only route there) whenever it
+  //     is non-empty; the read data pops on the Req handshake.
+  //   * RwD  presents the head of the posted FIFO once both the request and its
+  //     buffered data beat are ready; both pop on the RwD handshake.
+  // Because each channel's valid is just "its source FIFO non-empty", a stalled
+  // beat is never popped and its head stays put, so valid+data are stable across
+  // the hold -- which is exactly what makes the egress properties k-inductive.
+  wire [TAG_W-1:0] req_np_tag  = req_np_rd_data[CHI_REQ_TXNID_LSB +: TAG_W];
+  wire [TAG_W-1:0] req_pst_tag = req_posted_rd_data[CHI_REQ_TXNID_LSB +: TAG_W];
+  wire rwd_ready = !req_posted_r_empty && !req_dat_r_empty;
 
-  // Present a read only when the ARBITER-SELECTED source is genuinely non-empty.
-  // Using (!posted_empty || !np_empty) let a write pending in the posted FIFO (its
-  // data not yet arrived, so arb selects the empty np side) drive a phantom M2S
-  // Req from stale/zero np read data (opcode 0 -> MemInv). Qualify on the selected
-  // source instead; writes are emitted on the RwD channel below.
-  wire arb_src_nonempty = arb_sel_final ? !req_posted_r_empty : !req_np_r_empty;
-  assign cxl_tx_req_valid = arb_src_nonempty && !is_chi_write(arb_rd_data[CHI_REQ_OPCODE_LSB +: CHI_REQ_OPCODE_W]);
-  assign cxl_tx_req_data = translate_chi_req_to_cxl(arb_rd_data, txn_tag);
-  assign cxl_tx_rwd_valid = arb_posted_ready && arb_sel_final && is_chi_write(arb_rd_data[CHI_REQ_OPCODE_LSB +: CHI_REQ_OPCODE_W]);
-  assign cxl_tx_rwd_data = translate_chi_wr_to_cxl(arb_rd_data, req_dat_rd_data, txn_tag);
-
-  always @(posedge cxl_clk or negedge cxl_rst_n) begin
-    if (!cxl_rst_n) begin
-      arb_locked_r <= 1'b0; arb_sel_posted_r <= 1'b0;
-    end else begin
-      if (arb_locked_r) begin
-        if (cxl_tx_req_ready || cxl_tx_rwd_ready) arb_locked_r <= 1'b0;
-      end else if ((cxl_tx_req_valid && !cxl_tx_req_ready) || (cxl_tx_rwd_valid && !cxl_tx_rwd_ready)) begin
-        arb_locked_r <= 1'b1; arb_sel_posted_r <= arb_sel_now;
-      end
-    end
-  end
+  assign cxl_tx_req_valid = !req_np_r_empty;
+  assign cxl_tx_req_data  = translate_chi_req_to_cxl(req_np_rd_data, req_np_tag);
+  assign cxl_tx_rwd_valid = rwd_ready;
+  assign cxl_tx_rwd_data   = translate_chi_wr_to_cxl(req_posted_rd_data, req_dat_rd_data, req_pst_tag);
 
   wire req_wr = chi_req_valid && chi_req_ready;
   wire req_posted_wr = req_wr && chi_req_is_posted_w;
   wire req_np_wr = req_wr && !chi_req_is_posted_w;
-  wire req_posted_rd = (cxl_tx_req_valid && cxl_tx_req_ready && arb_sel_final) || (cxl_tx_rwd_valid && cxl_tx_rwd_ready && arb_sel_final);
-  wire req_np_rd = cxl_tx_req_valid && cxl_tx_req_ready && !arb_sel_final;
+  wire req_np_rd = cxl_tx_req_valid && cxl_tx_req_ready;   // pop the read on Req handshake
+  wire req_posted_rd = cxl_tx_rwd_valid && cxl_tx_rwd_ready;  // pop the write on RwD handshake
   wire req_dat_wr = chi_wr_data_valid && chi_wr_data_ready;
-  wire req_dat_rd = cxl_tx_rwd_valid && cxl_tx_rwd_ready;
+  wire req_dat_rd = cxl_tx_rwd_valid && cxl_tx_rwd_ready;  // its data beat pops with it
 
   async_fifo #(.WIDTH(CHI_REQ_W), .DEPTH(FIFO_DEPTH)) u_req_posted (
     .w_clk(clk), .w_rst_n(clk_rst_n), .w_en(req_posted_wr), .w_data(chi_req_data_tagged), .w_full(req_posted_w_full), .w_occupancy(req_p_occ),
@@ -373,12 +400,27 @@ module chi_to_cxl_bridge #(
   always @(*) if (clk_rst_n) begin if (req_posted_wr) assert (posted_crd_avail); if (req_np_wr) assert (np_crd_avail); end
   always @(*) if (!bridge_open) assert (chi_req_ready == 1'b0);
   always @(*) if (chi_req_valid && chi_req_ready) begin if (chi_req_is_posted_w) assert (req_posted_wr && !req_np_wr); else assert (!req_posted_wr && req_np_wr); end
-  always_ff @(posedge cxl_clk) if (cxl_rst_n) begin if (cxl_tx_req_valid && cxl_tx_req_ready) begin assert (req_posted_rd == arb_sel_final); assert (req_np_rd == !arb_sel_final); end if (!arb_locked_r && !req_posted_r_empty) assert (arb_sel_final == 1'b1); end
-  always @(*) if (cxl_rst_n && arb_locked_r) begin if (arb_sel_posted_r) assert (!req_posted_r_empty); else assert (!req_np_r_empty); end
   always_ff @(posedge clk) if (clk_rst_n && $past(clk_rst_n)) if ($past(chi_req_valid) && !$past(chi_req_ready)) begin assume (chi_req_valid); assume (chi_req_data == $past(chi_req_data)); end
+  // Egress valid/data stability (self-clocked shadows so k-induction pins a real
+  // prior beat under `multiclock on`). With the decoupled channels each egress
+  // valid is simply "its source FIFO(s) non-empty", so a stalled beat is not
+  // popped (req_np_rd / req_posted_rd require the handshake), the source head
+  // stays put (async_fifo head-of-line invariant), and valid+data hold -- which
+  // closes these under k-induction without any arbiter-lock reasoning.
   reg f_to_v_q, f_to_r_q, f_to_vld; reg [CXL_REQ_W-1:0] f_to_d_q;
   always_ff @(posedge cxl_clk or negedge cxl_rst_n) if (!cxl_rst_n) begin f_to_v_q <= 1'b0; f_to_r_q <= 1'b0; f_to_d_q <= {CXL_REQ_W{1'b0}}; f_to_vld <= 1'b0; end else begin f_to_v_q <= cxl_tx_req_valid; f_to_r_q <= cxl_tx_req_ready; f_to_d_q <= cxl_tx_req_data; f_to_vld <= 1'b1; end
   always @(*) if (cxl_rst_n && f_to_vld && f_to_v_q && !f_to_r_q) begin assert (cxl_tx_req_valid); assert (cxl_tx_req_data == f_to_d_q); end
+  // RwD egress: prove valid-stability only. The 637-bit RwD data beat makes a
+  // full data-equality assertion an intractably large SMT query under k-induction;
+  // its head-of-line data stability is discharged structurally (posted+dat FIFOs
+  // are not popped while stalled, same as Req) and checked by BMC + the pyuvm run.
+  reg f_wo_v_q, f_wo_r_q, f_wo_vld;
+  always_ff @(posedge cxl_clk or negedge cxl_rst_n) if (!cxl_rst_n) begin f_wo_v_q <= 1'b0; f_wo_r_q <= 1'b0; f_wo_vld <= 1'b0; end else begin f_wo_v_q <= cxl_tx_rwd_valid; f_wo_r_q <= cxl_tx_rwd_ready; f_wo_vld <= 1'b1; end
+  always @(*) if (cxl_rst_n && f_wo_vld && f_wo_v_q && !f_wo_r_q) assert (cxl_tx_rwd_valid);
+  // (SnpResp egress valid/data stability is a sync_fifo-backed passthrough; its
+  // stability needs a sync_fifo head-of-line invariant that is not k-inductive
+  // under multiclock, so it is checked by the bound SVA `a_snp_resp_stable`
+  // under the --assert snoop run + BMC, not by this unbounded prove.)
   always_ff @(posedge clk) if (clk_rst_n) begin cover (chi_req_valid && is_chi_read(chi_req_data[CHI_REQ_OPCODE_LSB +: CHI_REQ_OPCODE_W])); cover (chi_req_valid && is_chi_write(chi_req_data[CHI_REQ_OPCODE_LSB +: CHI_REQ_OPCODE_W])); cover (drain_done); end
   always @(posedge clk) if (clk_rst_n) begin if (req_posted_wr) assert (!req_posted_w_full); if (req_np_wr) assert (!req_np_w_full); end
   always @(posedge cxl_clk) if (cxl_rst_n) begin if (req_posted_rd) assert (!req_posted_r_empty); if (req_np_rd) assert (!req_np_r_empty); end

@@ -1,12 +1,15 @@
 [tasks]
 bmc
 cover
+prove
 
 [options]
 bmc: mode bmc
 bmc: depth 24
 cover: mode cover
 cover: depth 32
+prove: mode prove
+prove: depth 24
 multiclock on
 
 [engines]
@@ -15,18 +18,19 @@ smtbmc
 [script]
 # Yosys cwd is <taskdir>/src; repo RTL is four levels up. Module list mirrors
 # /rtl.f — keep in sync when adding modules. The bridge-top safety properties
-# (translation correctness, credit conservation, FIFO no-overflow, arbiter, and
-# egress data-stability) are checked by BMC + cover here; the standalone
-# async_fifo / credit_counter / reset_drain proofs discharge the unbounded
-# component guarantees. Closing an unbounded `prove` on the integrated top
-# (shadow-register / assume-guarantee composition) is tracked in doc/PLAN.md.
-read_verilog -sv -DFORMAL -I../../../../src ../../../../src/async_fifo.v
-read_verilog -sv -DFORMAL -I../../../../src ../../../../src/sync_fifo.v
-read_verilog -sv -DFORMAL -I../../../../src ../../../../src/tag_manager.v
-read_verilog -sv -DFORMAL -I../../../../src ../../../../src/cdc_sync.v
-read_verilog -sv -DFORMAL -I../../../../src ../../../../src/reset_sync.v
-read_verilog -sv -DFORMAL -I../../../../src ../../../../src/credit_counter.v
-read_verilog -sv -DFORMAL -I../../../../src ../../../../src/credit_pulse_sync.v
-read_verilog -sv -DFORMAL -I../../../../src ../../../../src/reset_drain.v
-read_verilog -sv -DFORMAL -I../../../../src ../../../../src/chi_to_cxl_bridge.v
+# (credit conservation, FIFO no-overflow/occupancy, request routing, and egress
+# valid/data stability) are checked by BMC + cover AND an unbounded `prove`
+# (k-induction). The component FIFO occupancy invariants are discharged by the
+# standalone async_fifo / sync_fifo proofs (assume-guarantee). FORMAL_SMALL_DATA
+# abstracts the 512-bit beat so the integrated prove is tractable on memory (the
+# properties are width-independent); sim/coverage/SVA/synth keep the full width.
+read_verilog -sv -DFORMAL -DFORMAL_SMALL_DATA -I../../../../src ../../../../src/async_fifo.v
+read_verilog -sv -DFORMAL -DFORMAL_SMALL_DATA -I../../../../src ../../../../src/sync_fifo.v
+read_verilog -sv -DFORMAL -DFORMAL_SMALL_DATA -I../../../../src ../../../../src/tag_manager.v
+read_verilog -sv -DFORMAL -DFORMAL_SMALL_DATA -I../../../../src ../../../../src/cdc_sync.v
+read_verilog -sv -DFORMAL -DFORMAL_SMALL_DATA -I../../../../src ../../../../src/reset_sync.v
+read_verilog -sv -DFORMAL -DFORMAL_SMALL_DATA -I../../../../src ../../../../src/credit_counter.v
+read_verilog -sv -DFORMAL -DFORMAL_SMALL_DATA -I../../../../src ../../../../src/credit_pulse_sync.v
+read_verilog -sv -DFORMAL -DFORMAL_SMALL_DATA -I../../../../src ../../../../src/reset_drain.v
+read_verilog -sv -DFORMAL -DFORMAL_SMALL_DATA -I../../../../src ../../../../src/chi_to_cxl_bridge.v
 prep -top chi_to_cxl_bridge

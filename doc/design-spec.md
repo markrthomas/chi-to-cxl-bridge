@@ -10,8 +10,10 @@ interconnect egress port) to a CXL.mem link. It accepts CHI requests, translates
 each into a single CXL.mem M2S flit, crosses the two asynchronous clock domains,
 and reconstructs CXL.mem S2M responses into CHI response flits.
 
-It does **not** implement CHI coherency (the SNP channel), multi-beat data
-payload transport, or full flit framing — these are tracked in
+It implements a minimal CHI SNP path (the memory-only device answers every
+snoop `SnpResp` Invalid) but **not** a full CHI coherency state machine, and it
+does not yet do multi-beat data payload transport or full flit framing — these
+are tracked in
 [PLAN.md](PLAN.md).
 
 ## 2. Interfaces

@@ -41,3 +41,6 @@ work/
 *.swp
 .codex
 NOTES
+
+# SV-UVM (Verilator) build artifacts
+verification/uvm/vlt/obj/

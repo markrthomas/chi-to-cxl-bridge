@@ -47,6 +47,14 @@ interface chi_to_cxl_if (
   logic [CHI_DAT_W-1:0] chi_comp_data;
   logic                 chi_comp_data_ready = 1'b0;
 
+  // CHI SNP request in / SnpResp out (clk domain)
+  logic                 chi_snp_valid       = 1'b0;
+  logic [CHI_SNP_W-1:0] chi_snp_data        = '0;
+  logic                 chi_snp_ready;
+  logic                 chi_snp_resp_valid;
+  logic [CHI_SNPRSP_W-1:0] chi_snp_resp_data;
+  logic                 chi_snp_resp_ready  = 1'b0;
+
   // Link readiness / status
   logic                 link_up     = 1'b0;
   logic                 err_inj_en  = 1'b0;

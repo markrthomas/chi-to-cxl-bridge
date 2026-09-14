@@ -6,9 +6,9 @@
 
 SBY ?= sby
 
-.PHONY: all credit_counter reset_drain async_fifo chi_to_cxl_bridge clean
+.PHONY: all credit_counter reset_drain async_fifo sync_fifo chi_to_cxl_bridge clean
 
-all: credit_counter reset_drain async_fifo chi_to_cxl_bridge
+all: credit_counter reset_drain async_fifo sync_fifo chi_to_cxl_bridge
 	@echo "[FORMAL] All SymbiYosys checks passed."
 
 credit_counter:
@@ -23,13 +23,18 @@ async_fifo:
 	$(SBY) -f async_fifo.sby
 	@echo "[FORMAL] async_fifo: PASS (bmc + cover + unbounded prove)"
 
+sync_fifo:
+	$(SBY) -f sync_fifo.sby
+	@echo "[FORMAL] sync_fifo: PASS (bmc + cover + unbounded prove)"
+
 chi_to_cxl_bridge:
 	$(SBY) -f chi_to_cxl_bridge.sby
-	@echo "[FORMAL] chi_to_cxl_bridge: PASS (bmc depth 24 + cover)"
+	@echo "[FORMAL] chi_to_cxl_bridge: PASS (bmc depth 24 + cover + unbounded prove)"
 
 clean:
 	rm -rf credit_counter_bmc credit_counter_cover credit_counter_prove \
 	       reset_drain_bmc reset_drain_cover reset_drain_prove \
 	       async_fifo_bmc async_fifo_cover async_fifo_prove \
+	       sync_fifo_bmc sync_fifo_cover sync_fifo_prove \
 	       chi_to_cxl_bridge_bmc chi_to_cxl_bridge_cover chi_to_cxl_bridge_prove \
 	       credit_counter_ci.sby reset_drain_ci.sby chi_to_cxl_bridge_ci.sby
