@@ -75,8 +75,13 @@ Implemented and green locally:
 - [x] Backpressure / FIFO-occupancy covergroup (`test_backpressure.py` +
       `coverage_model.BP_POINTS`): 7 stall / near-full / credit-exhaustion bins,
       driven by dedicated stall stimulus, 100%-gated under `make fcov`.
-- [ ] Constrained-random stimulus with per-transaction randomization objects for
-      closed-loop coverage-driven generation.
+- [x] Constrained-random stimulus: `seq_lib.chi_seq_lib.ChiReqRandom` is a
+      `cocotb_coverage.crv.Randomized` object (constrained opcode + 64B-aligned
+      address) that `RandomSeq` / `test_random` draw from, replacing the ad-hoc
+      `random`-module builders. (cocotb_coverage is therefore a core pyuvm-tier
+      dependency now, not fcov-only.)
+- [ ] Closed-loop coverage-driven generation (bias the crv toward uncovered
+      bins) — a further refinement.
 
 ## Phase 3 — protocol fidelity
 
