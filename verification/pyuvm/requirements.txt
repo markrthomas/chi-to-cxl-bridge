@@ -3,6 +3,7 @@
 # ../ucie2-pipe7-bridge/dv/pyuvm/requirements.txt.
 cocotb>=1.9
 pyuvm>=3.0
-# Functional-coverage tier only (make fcov); pure-Python, independent of the
-# Verilator line-coverage tier.
+# Functional coverage (make fcov) AND the constrained-random sequence
+# (seq_lib.chi_seq_lib.ChiReqRandom uses cocotb_coverage.crv), so it is required
+# by the whole pyuvm tier, not just fcov.
 cocotb_coverage
