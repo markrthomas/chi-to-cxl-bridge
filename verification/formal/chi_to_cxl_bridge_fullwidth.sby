@@ -1,0 +1,44 @@
+# Full-datapath-WIDTH formal proof of chi_to_cxl_bridge (no FORMAL_SMALL_DATA).
+#
+# The integrated `chi_to_cxl_bridge.sby` proof abstracts the 512-bit beat down to
+# 8 bits (FORMAL_SMALL_DATA) so the wide-datapath SMT proof stays within a small
+# machine's memory. This companion re-runs the SAME safety properties at the FULL
+# 512-bit width. The bridge's properties are data-width-independent -- they are
+# control-path (credit conservation, FIFO no-overflow/occupancy, request routing,
+# egress valid/data stability, and the multi-beat burst counters), and no
+# assertion reads the wide FIFO payloads. So the only wide state is the FIFO data
+# memories, whose CONTENTS are unconstrained; keeping them as SMT arrays (bitwuzla)
+# rather than bit-blasting them keeps the proof tractable at full width.
+#
+# This is intentionally NOT part of the default `make formal` / the small-memory
+# `formal` CI job -- it needs a higher-memory runner and is driven by its own
+# `formal-fullwidth` CI job (see .github/workflows/ci.yml).
+
+[tasks]
+bmc
+prove
+
+[options]
+bmc:   mode bmc
+bmc:   depth 24
+prove: mode prove
+prove: depth 24
+multiclock on
+
+# bitwuzla keeps the wide FIFO memories as SMT arrays (no bit-blasting), so the
+# 512-bit datapath does not explode the state vector the way the default engine's
+# bit-blasting does. Same properties as the small-width proof, at full width.
+[engines]
+smtbmc bitwuzla
+
+[script]
+read_verilog -sv -DFORMAL -I../../../../src ../../../../src/async_fifo.v
+read_verilog -sv -DFORMAL -I../../../../src ../../../../src/sync_fifo.v
+read_verilog -sv -DFORMAL -I../../../../src ../../../../src/tag_manager.v
+read_verilog -sv -DFORMAL -I../../../../src ../../../../src/cdc_sync.v
+read_verilog -sv -DFORMAL -I../../../../src ../../../../src/reset_sync.v
+read_verilog -sv -DFORMAL -I../../../../src ../../../../src/credit_counter.v
+read_verilog -sv -DFORMAL -I../../../../src ../../../../src/credit_pulse_sync.v
+read_verilog -sv -DFORMAL -I../../../../src ../../../../src/reset_drain.v
+read_verilog -sv -DFORMAL -I../../../../src ../../../../src/chi_to_cxl_bridge.v
+prep -top chi_to_cxl_bridge
