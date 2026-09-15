@@ -127,6 +127,7 @@ module chi_to_cxl_bridge #(
       cxl_req[CXL_REQ_METAVAL_LSB +: CXL_REQ_METAVAL_W] = 2'h0;
       cxl_req[CXL_REQ_TAG_LSB     +: CXL_REQ_TAG_W]     = tag;
       cxl_req[CXL_REQ_ADDR_LSB    +: CXL_REQ_ADDR_W]    = chi_pkt[CHI_REQ_ADDR_LSB +: CHI_REQ_ADDR_W];
+      cxl_req[CXL_REQ_LEN_LSB     +: CXL_REQ_LEN_W]     = chi_req_beats(chi_pkt[CHI_REQ_SIZE_LSB +: CHI_REQ_SIZE_W]);
       cxl_req[CXL_REQ_TC_LSB      +: CXL_REQ_TC_W]      = 2'h0;
       translate_chi_req_to_cxl = cxl_req;
     end
@@ -143,6 +144,7 @@ module chi_to_cxl_bridge #(
         default:               cxl_rwd[CXL_RWD_MEMOP_LSB +: CXL_RWD_MEMOP_W] = CXL_MEMWR;
       endcase
       cxl_rwd[CXL_RWD_TAG_LSB     +: CXL_RWD_TAG_W]     = tag;
+      cxl_rwd[CXL_RWD_LEN_LSB     +: CXL_RWD_LEN_W]     = chi_req_beats(chi_req[CHI_REQ_SIZE_LSB +: CHI_REQ_SIZE_W]);
       cxl_rwd[CXL_RWD_ADDR_LSB    +: CXL_RWD_ADDR_W]    = chi_req[CHI_REQ_ADDR_LSB +: CHI_REQ_ADDR_W];
       cxl_rwd[CXL_RWD_METAFLD_LSB +: CXL_RWD_METAFLD_W] = 2'h0;
       cxl_rwd[CXL_RWD_METAVAL_LSB +: CXL_RWD_METAVAL_W] = 2'h0;
@@ -256,6 +258,7 @@ module chi_to_cxl_bridge #(
   wire tag_alloc_vld, tag_alloc_rdy;
   wire [TXNID_W-1:0] tag_alloc_txnid = chi_req_data[CHI_REQ_TXNID_LSB +: TXNID_W];
   wire [NODEID_W-1:0] tag_alloc_srcid = chi_req_data[CHI_REQ_SRCID_LSB +: NODEID_W];
+  wire [BEATCNT_W-1:0] tag_alloc_len = chi_req_beats(chi_req_data[CHI_REQ_SIZE_LSB +: CHI_REQ_SIZE_W]);
   wire [TAG_W-1:0] tag_alloc_tag;
 
   assign tag_alloc_vld = chi_req_valid && bridge_open;
@@ -320,13 +323,24 @@ module chi_to_cxl_bridge #(
   assign chi_comp_data = chi_comp_data_recovered;
 
   wire release_a_vld = chi_rsp_valid && chi_rsp_ready && !rsp_ndr_r_empty;
-  wire release_b_vld = chi_comp_data_valid && chi_comp_data_ready;
+  // Read return is multi-beat: forward every DRS beat as CompData, but free the
+  // tag only on the LAST beat of the burst (the tag's stored LEN). A read's DRS
+  // beats arrive contiguously (same tag), so a single beat counter suffices.
+  wire [BEATCNT_W-1:0] release_b_len;
+  reg  [BEATCNT_W-1:0] drs_beat_q;
+  wire comp_hs   = chi_comp_data_valid && chi_comp_data_ready;
+  wire drs_last  = (drs_beat_q == release_b_len - 1'b1);
+  wire release_b_vld = comp_hs && drs_last;
+  always @(posedge clk or negedge clk_rst_n) begin
+    if (!clk_rst_n)     drs_beat_q <= {BEATCNT_W{1'b0}};
+    else if (comp_hs)   drs_beat_q <= drs_last ? {BEATCNT_W{1'b0}} : drs_beat_q + 1'b1;
+  end
 
-  tag_manager #(.TAG_W(TAG_W), .TXNID_W(TXNID_W), .SRCID_W(NODEID_W)) u_tag_mgr (
+  tag_manager #(.TAG_W(TAG_W), .TXNID_W(TXNID_W), .SRCID_W(NODEID_W), .LEN_W(BEATCNT_W)) u_tag_mgr (
     .clk(clk), .rst_n(clk_rst_n),
-    .alloc_vld(tag_alloc_vld), .alloc_txnid(tag_alloc_txnid), .alloc_srcid(tag_alloc_srcid), .alloc_rdy(tag_alloc_rdy), .alloc_tag(tag_alloc_tag),
+    .alloc_vld(tag_alloc_vld), .alloc_txnid(tag_alloc_txnid), .alloc_srcid(tag_alloc_srcid), .alloc_len(tag_alloc_len), .alloc_rdy(tag_alloc_rdy), .alloc_tag(tag_alloc_tag),
     .release_a_vld(release_a_vld), .release_a_tag(rsp_ndr_rd_data[CHI_RSP_DBID_LSB +: TAG_W]), .release_a_txnid(release_a_txnid), .release_a_srcid(release_a_srcid),
-    .release_b_vld(release_b_vld), .release_b_tag(rsp_drs_rd_data[CHI_DAT_TXNID_LSB +: TAG_W]), .release_b_txnid(release_b_txnid), .release_b_srcid(release_b_srcid)
+    .release_b_vld(release_b_vld), .release_b_tag(rsp_drs_rd_data[CHI_DAT_TXNID_LSB +: TAG_W]), .release_b_txnid(release_b_txnid), .release_b_srcid(release_b_srcid), .release_b_len(release_b_len)
   );
 
   wire [CHI_REQ_W-1:0] chi_req_data_tagged = {
@@ -349,6 +363,18 @@ module chi_to_cxl_bridge #(
   wire [TAG_W-1:0] req_pst_tag = req_posted_rd_data[CHI_REQ_TXNID_LSB +: TAG_W];
   wire rwd_ready = !req_posted_r_empty && !req_dat_r_empty;
 
+  // A write is multi-beat: the head posted request stays put while its LEN data
+  // beats stream out on RwD. rwd_beat_q counts beats in the cxl_clk domain; the
+  // command (posted FIFO) pops only on the last beat, the data FIFO on every beat.
+  wire [BEATCNT_W-1:0] rwd_len  = chi_req_beats(req_posted_rd_data[CHI_REQ_SIZE_LSB +: CHI_REQ_SIZE_W]);
+  reg  [BEATCNT_W-1:0] rwd_beat_q;
+  wire rwd_hs   = cxl_tx_rwd_valid && cxl_tx_rwd_ready;
+  wire rwd_last = (rwd_beat_q == rwd_len - 1'b1);
+  always @(posedge cxl_clk or negedge cxl_rst_n) begin
+    if (!cxl_rst_n)    rwd_beat_q <= {BEATCNT_W{1'b0}};
+    else if (rwd_hs)   rwd_beat_q <= rwd_last ? {BEATCNT_W{1'b0}} : rwd_beat_q + 1'b1;
+  end
+
   assign cxl_tx_req_valid = !req_np_r_empty;
   assign cxl_tx_req_data  = translate_chi_req_to_cxl(req_np_rd_data, req_np_tag);
   assign cxl_tx_rwd_valid = rwd_ready;
@@ -358,9 +384,9 @@ module chi_to_cxl_bridge #(
   wire req_posted_wr = req_wr && chi_req_is_posted_w;
   wire req_np_wr = req_wr && !chi_req_is_posted_w;
   wire req_np_rd = cxl_tx_req_valid && cxl_tx_req_ready;   // pop the read on Req handshake
-  wire req_posted_rd = cxl_tx_rwd_valid && cxl_tx_rwd_ready;  // pop the write on RwD handshake
+  wire req_posted_rd = rwd_hs && rwd_last;                 // pop the command on the LAST RwD beat
   wire req_dat_wr = chi_wr_data_valid && chi_wr_data_ready;
-  wire req_dat_rd = cxl_tx_rwd_valid && cxl_tx_rwd_ready;  // its data beat pops with it
+  wire req_dat_rd = rwd_hs;                                // a data beat pops on every RwD beat
 
   async_fifo #(.WIDTH(CHI_REQ_W), .DEPTH(FIFO_DEPTH)) u_req_posted (
     .w_clk(clk), .w_rst_n(clk_rst_n), .w_en(req_posted_wr), .w_data(chi_req_data_tagged), .w_full(req_posted_w_full), .w_occupancy(req_p_occ),

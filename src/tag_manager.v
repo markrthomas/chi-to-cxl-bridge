@@ -10,7 +10,8 @@
 module tag_manager #(
   parameter integer TAG_W = 4,
   parameter integer TXNID_W = 8,
-  parameter integer SRCID_W = 7
+  parameter integer SRCID_W = 7,
+  parameter integer LEN_W = 3        // per-tag burst beat count (multi-beat)
 ) (
 /* verilator lint_on VARHIDDEN */
   input  wire               clk,
@@ -20,6 +21,7 @@ module tag_manager #(
   input  wire               alloc_vld,
   input  wire [TXNID_W-1:0] alloc_txnid,
   input  wire [SRCID_W-1:0] alloc_srcid,
+  input  wire [LEN_W-1:0]   alloc_len,
   output wire               alloc_rdy,
   output wire [TAG_W-1:0]   alloc_tag,
 
@@ -33,7 +35,8 @@ module tag_manager #(
   input  wire               release_b_vld,
   input  wire [TAG_W-1:0]   release_b_tag,
   output wire [TXNID_W-1:0] release_b_txnid,
-  output wire [SRCID_W-1:0] release_b_srcid
+  output wire [SRCID_W-1:0] release_b_srcid,
+  output wire [LEN_W-1:0]   release_b_len   // burst length of the looked-up tag
 );
 
   localparam integer N_TAGS = (1 << TAG_W);
@@ -95,23 +98,28 @@ module tag_manager #(
     .rd_data(free_fifo_rdata)
   );
 
-  // --- Transaction state RAM ---
-  reg [TXNID_W+SRCID_W-1:0] state_mem[N_TAGS-1:0];
+  // --- Transaction state RAM: {len, txnid, srcid} per tag ---
+  localparam integer STATE_W = LEN_W + TXNID_W + SRCID_W;
+  reg [STATE_W-1:0] state_mem[N_TAGS-1:0];
 
   always @(posedge clk) begin
     if (alloc_vld && alloc_rdy) begin
-      state_mem[alloc_tag] <= {alloc_txnid, alloc_srcid};
+      state_mem[alloc_tag] <= {alloc_len, alloc_txnid, alloc_srcid};
     end
   end
 
-  // Combinational lookup for Port A
-  wire [TXNID_W+SRCID_W-1:0] state_a = state_mem[release_a_tag];
+  // Combinational lookup for Port A. Port A (NDR/write completion) does not need
+  // the stored burst length, so the LEN bits of this read are intentionally unused.
+  /* verilator lint_off UNUSEDSIGNAL */
+  wire [STATE_W-1:0] state_a = state_mem[release_a_tag];
+  /* verilator lint_on UNUSEDSIGNAL */
   assign release_a_txnid = state_a[SRCID_W +: TXNID_W];
   assign release_a_srcid = state_a[0 +: SRCID_W];
 
-  // Combinational lookup for Port B
-  wire [TXNID_W+SRCID_W-1:0] state_b = state_mem[release_b_tag];
+  // Combinational lookup for Port B (also returns the burst length)
+  wire [STATE_W-1:0] state_b = state_mem[release_b_tag];
   assign release_b_txnid = state_b[SRCID_W +: TXNID_W];
   assign release_b_srcid = state_b[0 +: SRCID_W];
+  assign release_b_len   = state_b[SRCID_W + TXNID_W +: LEN_W];
 
 endmodule
