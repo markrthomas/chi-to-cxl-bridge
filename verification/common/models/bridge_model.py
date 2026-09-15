@@ -6,10 +6,11 @@ uses this as a reference the RTL must agree with, so a common-mode bug in one
 cannot pass silently. No RTL is imported -- the constants below are transcribed
 from the defs header and MUST be kept in sync with it.
 
-Channels (single beat, 64-byte data):
-  CHI REQ  in   -> CXL M2S Req (read)  /  CXL M2S RwD (write, after DBIDResp+WrData)
-  CXL S2M DRS  -> CHI CompData (read return)
-  CXL S2M NDR  -> CHI Comp     (write completion)
+Channels (runtime-variable burst length 1..MAX_BEATS, 64-byte beats):
+  CHI REQ  in   -> CXL M2S Req (read, carries LEN)  /  CXL M2S RwD (write, LEN
+                  beats after DBIDResp+WrData)
+  CXL S2M DRS  -> CHI CompData (read return, LEN beats)
+  CXL S2M NDR  -> CHI Comp     (write completion, one per burst)
 """
 
 # ============================ field maps (from defs.vh) ======================
@@ -35,15 +36,16 @@ CHI_DAT_W = 598
 
 CXL_REQ = {
     "TC": (0, 2), "ADDR": (2, 48), "TAG": (50, 4), "METAVAL": (54, 2),
-    "METAFLD": (56, 2), "SNPTYPE": (58, 3), "MEMOP": (61, 4),
+    "METAFLD": (56, 2), "SNPTYPE": (58, 3), "LEN": (61, 3), "MEMOP": (64, 4),
 }
-CXL_REQ_W = 65
+CXL_REQ_W = 68
 
 CXL_RWD = {
     "DATA": (0, 512), "BE": (512, 64), "POISON": (576, 1), "METAVAL": (577, 2),
-    "METAFLD": (579, 2), "ADDR": (581, 48), "TAG": (629, 4), "MEMOP": (633, 4),
+    "METAFLD": (579, 2), "ADDR": (581, 48), "TAG": (629, 4), "LEN": (633, 3),
+    "MEMOP": (636, 4),
 }
-CXL_RWD_W = 637
+CXL_RWD_W = 640
 
 CXL_NDR = {
     "DEVLOAD": (0, 2), "TAG": (2, 4), "METAVAL": (6, 2), "METAFLD": (8, 2),
@@ -104,8 +106,18 @@ BE_W = 64
 DATA_W = 512
 _BE_ALL = (1 << BE_W) - 1
 
+MAX_BEATS = 4          # mirrors defs.vh MAX_BEATS
+
 READ_OPS = (CHI_REQ_READNOSNP, CHI_REQ_READONCE)
 WRITE_OPS = (CHI_REQ_WRITENOSNPFULL, CHI_REQ_WRITENOSNPPTL, CHI_REQ_WRITEUNIQUEFULL)
+
+
+def chi_req_beats(size):
+    """Runtime burst length carried by a request (mirror of defs.vh chi_req_beats):
+    1..MAX_BEATS, with 0 or out-of-range treated as a single beat."""
+    if size == 0 or size > MAX_BEATS:
+        return 1
+    return size
 
 
 # ============================ bit-field helpers ==============================
@@ -142,7 +154,8 @@ def chi_req_to_cxl_req(chi_pkt, tag):
     else:
         memop = CXL_MEMINV
     return pack(CXL_REQ, memop=memop, tag=tag,
-                addr=get(chi_pkt, CHI_REQ["ADDR"]))
+                addr=get(chi_pkt, CHI_REQ["ADDR"]),
+                len=chi_req_beats(get(chi_pkt, CHI_REQ["SIZE"])))
 
 
 def chi_wr_to_cxl_rwd(chi_req, chi_dat, tag):
@@ -151,6 +164,7 @@ def chi_wr_to_cxl_rwd(chi_req, chi_dat, tag):
     memop = CXL_MEMWRPTL if op == CHI_REQ_WRITENOSNPPTL else CXL_MEMWR
     return pack(CXL_RWD, memop=memop, tag=tag,
                 addr=get(chi_req, CHI_REQ["ADDR"]),
+                len=chi_req_beats(get(chi_req, CHI_REQ["SIZE"])),
                 poison=get(chi_dat, CHI_DAT["POISON"]),
                 be=get(chi_dat, CHI_DAT["BE"]),
                 data=get(chi_dat, CHI_DAT["DATA"]))
@@ -196,11 +210,20 @@ def make_cxl_drs(tag, data, poison=0, opcode=CXL_DRS_MEMDATA):
     return pack(CXL_DRS, tag=tag, data=data, poison=poison, opcode=opcode)
 
 
-def read_data_for_addr(addr):
-    """Deterministic 512-bit read-return pattern for an address, so a read's
-    CompData is predictable end-to-end without a shared mutable memory."""
-    lane = (addr * 0x9E3779B97F4A7C15 + 0xA5A5A5A5) & ((1 << 64) - 1)
+def read_data_for_addr(addr, beat=0):
+    """Deterministic 512-bit read-return pattern for an (address, beat), so a
+    multi-beat read's CompData is predictable end-to-end without a shared mutable
+    memory. beat=0 reproduces the original single-beat pattern exactly."""
+    lane = (addr * 0x9E3779B97F4A7C15 + 0xA5A5A5A5 + beat * 0xD1B54A32D192ED03) & ((1 << 64) - 1)
     val = 0
     for i in range(DATA_W // 64):
         val |= ((lane ^ (i * 0x0101010101010101)) & ((1 << 64) - 1)) << (64 * i)
     return val
+
+
+def wr_beat_data(base, beat):
+    """Deterministic 512-bit write payload for beat `beat` of a burst whose beat-0
+    payload is `base`. beat=0 returns `base` unchanged (single-beat compatible)."""
+    if beat == 0:
+        return base & ((1 << DATA_W) - 1)
+    return (base ^ (beat * 0x0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F)) & ((1 << DATA_W) - 1)
