@@ -105,6 +105,8 @@ RTL_DIR   ?= src
 pyuvm:
 	$(MAKE) -C $(PYUVM_DIR) MODULE=test_roundtrip
 	$(MAKE) -C $(PYUVM_DIR) MODULE=test_random
+	$(MAKE) -C $(PYUVM_DIR) MODULE=test_multibeat
+	$(MAKE) -C $(PYUVM_DIR) MODULE=test_multibeat_stress
 
 # cocotb: back-compat alias for the pyuvm functional tier.
 cocotb: pyuvm

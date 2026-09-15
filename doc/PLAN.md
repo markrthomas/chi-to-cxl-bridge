@@ -109,9 +109,18 @@ Implemented and green locally:
       clk-domain counter (`drs_beat_q`) that frees the tag only on the last beat.
       The tag manager stores the burst length per tag (`LEN_W`). Verified across
       all tiers: directed multi-beat scenario (`tb_chi_to_cxl_bridge.v`), pyuvm
-      `test_multibeat` + randomized `size` in `RandomSeq`, the `req_beats`
-      covergroup (100% under `make fcov`), the bound SVA, and the unbounded formal
-      `prove` (still k-inductive with the two beat counters).
+      `test_multibeat` + high-volume interleaved `test_multibeat_stress` (78 mixed
+      bursts self-throttling through the 16-tag pool) + randomized `size` in
+      `RandomSeq`, the `req_beats` covergroup (100% under `make fcov`), the bound
+      SVA, and the unbounded formal `prove`. The write-egress beat counter carries
+      **proven** invariants in the unbounded prove (`rwd_beat_q < rwd_len` and
+      `req_posted_r_empty -> rwd_beat_q == 0`, k-inductive because `chi_req_beats`
+      is structurally ≥1 for every SIZE encoding — so the command pops exactly
+      once per burst); the read side proves no tag is freed without a returning
+      DRS beat. (The read-side count relation depends on the unconstrained
+      tag-manager RAM, and a full-burst cover needs a chain deeper than the cover
+      engine runs tractably, so both are discharged by BMC + the pyuvm / SVA /
+      directed multi-beat runs instead.)
 
 ## Phase 4 — SV-UVM bench
 
