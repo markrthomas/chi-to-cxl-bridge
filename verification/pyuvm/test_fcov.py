@@ -18,7 +18,7 @@ import pyuvm
 from pyuvm import uvm_test, ConfigDB
 
 from env import BridgeEnv
-from seq_lib.chi_seq_lib import RoundTripSeq
+from seq_lib.chi_seq_lib import RoundTripSeq, MultiBeatSeq
 from test_roundtrip import bringup, quiesce
 import bridge_model as bm
 import coverage_model as cov
@@ -44,9 +44,11 @@ class FcovTest(uvm_test):
         cocotb.start_soon(self._observe_cxl(dut))
 
         seqr = ConfigDB().get(self, "", "CHI_SEQR")
-        # The directed round-trip alone spans all five REQ opcodes, all four
-        # translated MemOpcodes, both RSP opcodes and CompData -> honest 100%.
+        # The directed round-trip spans all five REQ opcodes, all four translated
+        # MemOpcodes, both RSP opcodes and CompData; the multi-beat burst adds the
+        # runtime burst lengths 1..MAX_BEATS -> honest 100% of the functional set.
         await RoundTripSeq("roundtrip").start(seqr)
+        await MultiBeatSeq("multibeat").start(seqr)
         await quiesce(dut, 300)
 
         self._finish()
@@ -56,9 +58,11 @@ class FcovTest(uvm_test):
         while True:
             await RisingEdge(dut.clk)
             if _i(dut.chi_req_valid) and _i(dut.chi_req_ready):
-                op = bm.get(_i(dut.chi_req_data), bm.CHI_REQ["OPCODE"])
+                req = _i(dut.chi_req_data)
+                op = bm.get(req, bm.CHI_REQ["OPCODE"])
                 cov.sample_req({"opcode": op,
                                 "kind": "write" if bm.is_write(op) else "read"})
+                cov.sample_beats({"beats": bm.chi_req_beats(bm.get(req, bm.CHI_REQ["SIZE"]))})
             if _i(dut.chi_rsp_valid) and _i(dut.chi_rsp_ready):
                 cov.sample_rsp({"opcode": bm.get(_i(dut.chi_rsp_data), bm.CHI_RSP["OPCODE"])})
             if _i(dut.chi_comp_data_valid) and _i(dut.chi_comp_data_ready):

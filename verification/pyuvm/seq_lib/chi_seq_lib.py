@@ -27,8 +27,10 @@ class ChiReqRandom(Randomized):
         Randomized.__init__(self)
         self.opcode = _READS[0]
         self.addr_idx = 0
+        self.size = 1
         self.add_rand("opcode", _READS + _WRITES)
         self.add_rand("addr_idx", list(range(1024)))
+        self.add_rand("size", list(range(1, bm.MAX_BEATS + 1)))  # burst length 1..MAX_BEATS
 
     @property
     def addr(self):
@@ -79,6 +81,25 @@ class RoundTripSeq(uvm_sequence):
         await ReadSeq(n=2, base_txnid=0x70).start(self.sequencer)
 
 
+class MultiBeatSeq(uvm_sequence):
+    """Directed multi-beat burst mix: reads and writes across all burst lengths
+    1..MAX_BEATS, plus single-beat, with distinct TxnIDs. Exercises the
+    runtime-variable-length datapath (per-transaction beat count in the request)."""
+    async def body(self):
+        txnid = 0x80
+        for beats in (1, 2, 3, 4):
+            await _send(self, ChiReq(opcode=bm.CHI_REQ_READNOSNP,
+                                     addr=0x5EAD_0000 + (beats << 6),
+                                     txnid=txnid, size=beats))
+            txnid += 1
+            await _send(self, ChiReq(opcode=bm.CHI_REQ_WRITENOSNPFULL,
+                                     addr=0x7A17_0000 + (beats << 6),
+                                     txnid=txnid, size=beats,
+                                     data=0xABCD_0000_0000_0000 * (beats + 1)
+                                          & ((1 << 512) - 1)))
+            txnid += 1
+
+
 class RandomSeq(uvm_sequence):
     """Constrained-random read/write mix with distinct TxnIDs (closure / stress).
 
@@ -100,4 +121,4 @@ class RandomSeq(uvm_sequence):
             txnid = (i * 7 + 3) & 0xFF
             data = (0x9E3779B97F4A7C15 * (i + 1)) & ((1 << 512) - 1) if gen.is_write else 0
             await _send(self, ChiReq(opcode=gen.opcode, addr=gen.addr,
-                                     txnid=txnid, data=data))
+                                     txnid=txnid, data=data, size=gen.size))

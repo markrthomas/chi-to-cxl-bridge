@@ -100,9 +100,18 @@ Implemented and green locally:
       by `test_snoop.py` (gold-checked SnpResp_I, `snp_opcode` covergroup 100%),
       the bound SVA (`a_snp_resp_stable`, `a_snp_resp_is_snpresp_i`), and the
       formal SnpResp egress valid/data-stability shadow.
-- [ ] Multi-beat data payload transport across the async FIFOs. (The remaining
-      Phase 3 item; would ripple through the datapath, gold model, and the formal
-      data-width abstraction.)
+- [x] Multi-beat data payload transport with a **runtime-variable burst length**
+      (1..`MAX_BEATS`) carried per transaction. The CHI request `SIZE` field maps
+      (via `chi_req_beats`) to a beat count placed in `CXL_REQ.LEN` (reads) and
+      `CXL_RWD.LEN` (writes). A write streams its `LEN` RwD beats out of the write
+      buffer with a cxl-domain beat counter (`rwd_beat_q`) that pops the command
+      only on the last beat; a read returns `LEN` DRS→CompData beats with a
+      clk-domain counter (`drs_beat_q`) that frees the tag only on the last beat.
+      The tag manager stores the burst length per tag (`LEN_W`). Verified across
+      all tiers: directed multi-beat scenario (`tb_chi_to_cxl_bridge.v`), pyuvm
+      `test_multibeat` + randomized `size` in `RandomSeq`, the `req_beats`
+      covergroup (100% under `make fcov`), the bound SVA, and the unbounded formal
+      `prove` (still k-inductive with the two beat counters).
 
 ## Phase 4 — SV-UVM bench
 

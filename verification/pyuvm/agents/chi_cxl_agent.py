@@ -34,22 +34,32 @@ def _i(handle):
 
 # ============================ sequence item ==================================
 class ChiReq(uvm_sequence_item):
-    """One CHI request: a read, or a write carrying its 512-bit data beat."""
+    """One CHI request: a read, or a write carrying its data. `size` is the CHI
+    request size field, which the bridge maps to a runtime burst length of
+    `beats` = 1..MAX_BEATS (via bm.chi_req_beats). A write drives `beats` WrData
+    beats; a read returns `beats` CompData beats. The default size keeps the item
+    single-beat, so existing sequences are unchanged."""
     def __init__(self, name="ChiReq", opcode=bm.CHI_REQ_READNOSNP, addr=0,
-                 txnid=0, data=0):
+                 txnid=0, data=0, size=6):
         super().__init__(name)
         self.opcode = opcode
         self.addr = addr
         self.txnid = txnid
         self.data = data
+        self.size = size
 
     @property
     def is_write(self):
         return bm.is_write(self.opcode)
 
+    @property
+    def beats(self):
+        return bm.chi_req_beats(self.size)
+
     def __str__(self):
         kind = "WR" if self.is_write else "RD"
-        return f"ChiReq({kind} op=0x{self.opcode:02x} addr=0x{self.addr:012x} txnid=0x{self.txnid:02x})"
+        return (f"ChiReq({kind} op=0x{self.opcode:02x} addr=0x{self.addr:012x} "
+                f"txnid=0x{self.txnid:02x} beats={self.beats})")
 
 
 # ============================ CHI response monitor ===========================
@@ -115,11 +125,12 @@ class ChiDriver(uvm_driver):
             if req.is_write:
                 await rsp_mon.wait_dbid(req.txnid, dut.clk)
                 await self._drive_wrdata(dut, req)
-            self.ap.write(("req", req.opcode, req.addr, req.txnid, req.data))
+            self.ap.write(("req", req.opcode, req.addr, req.txnid, req.data, req.beats))
             self.seq_item_port.item_done()
 
     async def _drive_req(self, dut, req):
-        dut.chi_req_data.value = bm.make_chi_req(req.opcode, req.addr, req.txnid)
+        dut.chi_req_data.value = bm.make_chi_req(req.opcode, req.addr, req.txnid,
+                                                 size=req.size)
         dut.chi_req_valid.value = 1
         await RisingEdge(dut.clk)
         while not _i(dut.chi_req_ready):
@@ -127,11 +138,12 @@ class ChiDriver(uvm_driver):
         dut.chi_req_valid.value = 0
 
     async def _drive_wrdata(self, dut, req):
-        dut.chi_wr_data.value = bm.make_chi_wr_data(req.data)
-        dut.chi_wr_data_valid.value = 1
-        await RisingEdge(dut.clk)
-        while not _i(dut.chi_wr_data_ready):
+        for beat in range(req.beats):
+            dut.chi_wr_data.value = bm.make_chi_wr_data(bm.wr_beat_data(req.data, beat))
+            dut.chi_wr_data_valid.value = 1
             await RisingEdge(dut.clk)
+            while not _i(dut.chi_wr_data_ready):
+                await RisingEdge(dut.clk)
         dut.chi_wr_data_valid.value = 0
 
 
@@ -146,6 +158,7 @@ class CxlResponder(uvm_component):
         self.m2s_rwd_ap = uvm_analysis_port("m2s_rwd_ap", self)   # observed writes
         self._drs_q = []   # pending (tag, data) DRS to return
         self._ndr_q = []   # pending (tag,) NDR to return
+        self._rwd_seen = {}  # tag -> RwD beats seen so far (for multi-beat writes)
 
     async def run_phase(self):
         dut = cocotb.top
@@ -164,16 +177,28 @@ class CxlResponder(uvm_component):
                 flit = _i(dut.cxl_tx_req_data)
                 tag = bm.get(flit, bm.CXL_REQ["TAG"])
                 addr = bm.get(flit, bm.CXL_REQ["ADDR"])
+                beats = bm.get(flit, bm.CXL_REQ["LEN"])
+                # One M2S Req carries LEN; return that many DRS beats for the read.
                 self.m2s_req_ap.write(("m2s_req", bm.get(flit, bm.CXL_REQ["MEMOP"]),
-                                       addr, tag))
-                self._drs_q.append((tag, bm.read_data_for_addr(addr)))
+                                       addr, tag, beats))
+                for k in range(beats):
+                    self._drs_q.append((tag, bm.read_data_for_addr(addr, k)))
             if _i(dut.cxl_tx_rwd_valid) and _i(dut.cxl_tx_rwd_ready):
                 flit = _i(dut.cxl_tx_rwd_data)
+                tag = bm.get(flit, bm.CXL_RWD["TAG"])
+                beats = bm.get(flit, bm.CXL_RWD["LEN"])
+                k = self._rwd_seen.get(tag, 0)
+                # Each RwD beat is published in order; the device completes (NDR)
+                # once it has consumed all LEN beats of the write burst.
                 self.m2s_rwd_ap.write(("m2s_rwd", bm.get(flit, bm.CXL_RWD["MEMOP"]),
-                                       bm.get(flit, bm.CXL_RWD["ADDR"]),
-                                       bm.get(flit, bm.CXL_RWD["TAG"]),
-                                       bm.get(flit, bm.CXL_RWD["DATA"])))
-                self._ndr_q.append((bm.get(flit, bm.CXL_RWD["TAG"]),))
+                                       bm.get(flit, bm.CXL_RWD["ADDR"]), tag,
+                                       bm.get(flit, bm.CXL_RWD["DATA"]), k, beats))
+                k += 1
+                if k >= beats:
+                    self._ndr_q.append((tag,))
+                    self._rwd_seen[tag] = 0
+                else:
+                    self._rwd_seen[tag] = k
 
     async def _drs_loop(self, dut):
         while True:

@@ -38,6 +38,16 @@ localparam integer QOS_W    = 4;
 localparam integer TAG_W    = 4;            // CXL Tag / CHI DBID == bridge txn slot
 localparam integer N_OUTSTANDING = 16;      // 2**TAG_W
 
+// ---- Multi-beat bursts (Phase 3 completion) ----
+// A CHI request transfers LEN data beats (1..MAX_BEATS), a runtime-variable
+// burst length carried in the request's Size field. A transaction's beats are
+// contiguous on each data channel (the CXL device returns a read's beats as one
+// burst), so the datapath tracks beats with a single counter per channel rather
+// than per-tag state. LEN is conveyed to the CXL device in the M2S Req (see
+// CXL_REQ_LEN below) so it returns the right number of DRS beats.
+localparam integer MAX_BEATS = 4;
+localparam integer BEATCNT_W = 3;           // holds a beat count 1..MAX_BEATS
+
 // ============================ CHI opcodes / codes ============================
 // Representative encodings (not bit-exact to the CHI spec, but distinct & stable).
 
@@ -156,13 +166,15 @@ localparam integer CHI_DAT_OPCODE_LSB  = CHI_DAT_TXNID_LSB   + CHI_DAT_TXNID_W;
 localparam integer CHI_DAT_W           = CHI_DAT_OPCODE_LSB  + CHI_DAT_OPCODE_W;  // 598
 
 // ======================== CXL M2S Req flit field map ========================
-// {MemOpcode, SnpType, MetaField, MetaValue, Tag, Addr, TC}
+// {MemOpcode, Len, SnpType, MetaField, MetaValue, Tag, Addr, TC}
+// Len carries the burst beat count so the device returns that many DRS beats.
 localparam integer CXL_REQ_TC_W        = 2;
 localparam integer CXL_REQ_ADDR_W      = CHI_CXL_ADDR_W;
 localparam integer CXL_REQ_TAG_W       = TAG_W;
 localparam integer CXL_REQ_METAVAL_W   = 2;
 localparam integer CXL_REQ_METAFLD_W   = 2;
 localparam integer CXL_REQ_SNPTYPE_W   = 3;
+localparam integer CXL_REQ_LEN_W       = BEATCNT_W;
 localparam integer CXL_REQ_MEMOP_W     = 4;
 
 localparam integer CXL_REQ_TC_LSB      = 0;
@@ -171,11 +183,14 @@ localparam integer CXL_REQ_TAG_LSB     = CXL_REQ_ADDR_LSB    + CXL_REQ_ADDR_W;
 localparam integer CXL_REQ_METAVAL_LSB = CXL_REQ_TAG_LSB     + CXL_REQ_TAG_W;
 localparam integer CXL_REQ_METAFLD_LSB = CXL_REQ_METAVAL_LSB + CXL_REQ_METAVAL_W;
 localparam integer CXL_REQ_SNPTYPE_LSB = CXL_REQ_METAFLD_LSB + CXL_REQ_METAFLD_W;
-localparam integer CXL_REQ_MEMOP_LSB   = CXL_REQ_SNPTYPE_LSB + CXL_REQ_SNPTYPE_W;
-localparam integer CXL_REQ_W           = CXL_REQ_MEMOP_LSB   + CXL_REQ_MEMOP_W;  // 65
+localparam integer CXL_REQ_LEN_LSB     = CXL_REQ_SNPTYPE_LSB + CXL_REQ_SNPTYPE_W;
+localparam integer CXL_REQ_MEMOP_LSB   = CXL_REQ_LEN_LSB     + CXL_REQ_LEN_W;
+localparam integer CXL_REQ_W           = CXL_REQ_MEMOP_LSB   + CXL_REQ_MEMOP_W;  // 68
 
 // ======================== CXL M2S RwD flit field map ========================
-// {MemOpcode, Tag, Addr, MetaField, MetaValue, Poison, BE, Data}
+// {MemOpcode, Len, Tag, Addr, MetaField, MetaValue, Poison, BE, Data}
+// Len carries the write burst length (1..MAX_BEATS) so the device knows how many
+// RwD beats to consume before completing (NDR), mirroring CXL_REQ_LEN for reads.
 localparam integer CXL_RWD_DATA_W    = DATA_W;
 localparam integer CXL_RWD_BE_W      = BE_W;
 localparam integer CXL_RWD_POISON_W  = 1;
@@ -183,6 +198,7 @@ localparam integer CXL_RWD_METAVAL_W = 2;
 localparam integer CXL_RWD_METAFLD_W = 2;
 localparam integer CXL_RWD_ADDR_W    = CHI_CXL_ADDR_W;
 localparam integer CXL_RWD_TAG_W     = TAG_W;
+localparam integer CXL_RWD_LEN_W     = BEATCNT_W;
 localparam integer CXL_RWD_MEMOP_W   = 4;
 
 localparam integer CXL_RWD_DATA_LSB    = 0;
@@ -192,8 +208,9 @@ localparam integer CXL_RWD_METAVAL_LSB = CXL_RWD_POISON_LSB  + CXL_RWD_POISON_W;
 localparam integer CXL_RWD_METAFLD_LSB = CXL_RWD_METAVAL_LSB + CXL_RWD_METAVAL_W;
 localparam integer CXL_RWD_ADDR_LSB    = CXL_RWD_METAFLD_LSB + CXL_RWD_METAFLD_W;
 localparam integer CXL_RWD_TAG_LSB     = CXL_RWD_ADDR_LSB    + CXL_RWD_ADDR_W;
-localparam integer CXL_RWD_MEMOP_LSB   = CXL_RWD_TAG_LSB     + CXL_RWD_TAG_W;
-localparam integer CXL_RWD_W           = CXL_RWD_MEMOP_LSB   + CXL_RWD_MEMOP_W;  // 637
+localparam integer CXL_RWD_LEN_LSB     = CXL_RWD_TAG_LSB     + CXL_RWD_TAG_W;
+localparam integer CXL_RWD_MEMOP_LSB   = CXL_RWD_LEN_LSB     + CXL_RWD_LEN_W;
+localparam integer CXL_RWD_W           = CXL_RWD_MEMOP_LSB   + CXL_RWD_MEMOP_W;  // 640
 
 // ======================== CXL S2M NDR flit field map ========================
 // {Opcode, MetaField, MetaValue, Tag, DevLoad}
@@ -258,6 +275,18 @@ localparam integer CHI_SNPRSP_SRCID_LSB   = CHI_SNPRSP_OPCODE_LSB  + CHI_SNPRSP_
 localparam integer CHI_SNPRSP_W           = CHI_SNPRSP_SRCID_LSB   + CHI_SNPRSP_SRCID_W;  // 24
 
 // ---- Classification helpers ----
+// Burst beat count from a CHI REQ Size field: Size holds the count directly
+// (1..MAX_BEATS); 0 or out-of-range is treated as a single beat.
+function automatic [BEATCNT_W-1:0] chi_req_beats;
+  input [CHI_REQ_SIZE_W-1:0] size;
+  begin
+    if (size == 0 || {{(BEATCNT_W-CHI_REQ_SIZE_W){1'b0}}, size} > MAX_BEATS[BEATCNT_W-1:0])
+      chi_req_beats = 3'd1;
+    else
+      chi_req_beats = {{(BEATCNT_W-CHI_REQ_SIZE_W){1'b0}}, size};
+  end
+endfunction
+
 // True for CHI REQ opcodes that are writes (carry a WrData phase).
 function automatic is_chi_write;
   input [6:0] opcode;

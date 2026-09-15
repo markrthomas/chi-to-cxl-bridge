@@ -26,8 +26,10 @@ MEMOP_LABELS = ["MemRd", "MemRdData", "MemWr", "MemWrPtl"]
 RSP_OPS = [bm.CHI_RSP_DBIDRESP, bm.CHI_RSP_COMP]
 RSP_LABELS = ["DBIDResp", "Comp"]
 
+BEATS = list(range(1, bm.MAX_BEATS + 1))    # runtime burst length 1..MAX_BEATS
+
 POINTS = [
-    "bridge.chi.req_opcode", "bridge.chi.req_kind",
+    "bridge.chi.req_opcode", "bridge.chi.req_kind", "bridge.chi.req_beats",
     "bridge.cxl.m2s_memop", "bridge.chi.rsp_opcode", "bridge.chi.compdata",
 ]
 
@@ -37,6 +39,12 @@ POINTS = [
 @CoverPoint("bridge.chi.req_kind", xf=lambda s: s["kind"], bins=["read", "write"])
 def sample_req(s):
     """s = {opcode, kind('read'|'write')}."""
+    pass
+
+
+@CoverPoint("bridge.chi.req_beats", xf=lambda s: s["beats"], bins=BEATS)
+def sample_beats(s):
+    """s = {beats} = runtime burst length (1..MAX_BEATS) of an accepted request."""
     pass
 
 

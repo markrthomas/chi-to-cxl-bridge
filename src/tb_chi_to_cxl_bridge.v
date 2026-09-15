@@ -48,6 +48,10 @@ module tb_chi_to_cxl_bridge;
   reg         err_inj_en;
   wire        drain_done;
 
+  integer            i;
+  integer            rwd_seen, comp_seen;
+  reg [TAG_W-1:0]    rd_tag, wr_tag;
+
   chi_to_cxl_bridge #(
     .FIFO_DEPTH (FIFO_DEPTH)
   ) dut (
@@ -261,7 +265,107 @@ module tb_chi_to_cxl_bridge;
        $display("FAIL: data mismatch"); $finish(1);
     end
 
-    $display("PASS Phase 3a bidirectional smoke tests");
+    // ---------------- Multi-beat (runtime-length) datapath test ----------------
+    $display("INFO: Starting multi-beat WR test (LEN=2)");
+    @(posedge clk);
+    chi_req_data = {CHI_REQ_W{1'b0}};
+    chi_req_data[CHI_REQ_OPCODE_LSB +: CHI_REQ_OPCODE_W] = CHI_REQ_WRITENOSNPFULL;
+    chi_req_data[CHI_REQ_ADDR_LSB   +: CHI_REQ_ADDR_W]   = 48'hAAAA_0000_0040;
+    chi_req_data[CHI_REQ_SIZE_LSB   +: CHI_REQ_SIZE_W]   = 3'd2;   // 2 beats
+    chi_req_data[CHI_REQ_TXNID_LSB  +: CHI_REQ_TXNID_W]  = 8'h55;
+    chi_req_valid = 1'b1;
+    cxl_tx_rwd_ready = 1'b0;   // hold egress off while we buffer the beats
+    @(posedge clk);
+    while (!chi_req_ready) @(posedge clk);
+    chi_req_valid = 1'b0;
+
+    chi_rsp_ready = 1'b1;
+    wait (chi_rsp_valid && chi_rsp_data[CHI_RSP_OPCODE_LSB +: CHI_RSP_OPCODE_W] === CHI_RSP_DBIDRESP);
+    wr_tag = chi_rsp_data[CHI_RSP_DBID_LSB +: TAG_W];
+    $display("INFO: multi-beat WR DBIDResp, tag=%h -- sending 2 data beats", wr_tag);
+
+    for (i = 0; i < 2; i = i + 1) begin
+      @(posedge clk);
+      chi_wr_data = {CHI_DAT_W{1'b0}};
+      chi_wr_data[CHI_DAT_DATA_LSB +: 64] = 64'hB0B0_0000_0000_0000 + i;
+      chi_wr_data[CHI_DAT_BE_LSB   +: CHI_DAT_BE_W] = {BE_W{1'b1}};
+      chi_wr_data_valid = 1'b1;
+      @(posedge clk);
+      while (!chi_wr_data_ready) @(posedge clk);
+    end
+    chi_wr_data_valid = 1'b0;
+
+    // Now drain the RwD egress and confirm exactly 2 beats, each carrying LEN=2.
+    cxl_tx_rwd_ready = 1'b1;
+    rwd_seen = 0;
+    while (rwd_seen < 2) begin
+      @(posedge cxl_clk);
+      if (cxl_tx_rwd_valid && cxl_tx_rwd_ready) begin
+        if (cxl_tx_rwd_data[CXL_RWD_LEN_LSB +: CXL_RWD_LEN_W] !== 3'd2) begin
+          $display("FAIL: RwD LEN mismatch beat %0d got=%h", rwd_seen,
+                   cxl_tx_rwd_data[CXL_RWD_LEN_LSB +: CXL_RWD_LEN_W]); $finish(1);
+        end
+        if (cxl_tx_rwd_data[CXL_RWD_DATA_LSB +: 64] !== (64'hB0B0_0000_0000_0000 + rwd_seen)) begin
+          $display("FAIL: RwD data mismatch beat %0d got=%h", rwd_seen,
+                   cxl_tx_rwd_data[CXL_RWD_DATA_LSB +: 64]); $finish(1);
+        end
+        rwd_seen = rwd_seen + 1;
+      end
+    end
+    $display("INFO: multi-beat WR OK -- 2 RwD beats egressed");
+
+    $display("INFO: Starting multi-beat RD test (LEN=3)");
+    @(posedge clk);
+    chi_req_data = {CHI_REQ_W{1'b0}};
+    chi_req_data[CHI_REQ_OPCODE_LSB +: CHI_REQ_OPCODE_W] = CHI_REQ_READNOSNP;
+    chi_req_data[CHI_REQ_ADDR_LSB   +: CHI_REQ_ADDR_W]   = 48'hBBBB_0000_0080;
+    chi_req_data[CHI_REQ_SIZE_LSB   +: CHI_REQ_SIZE_W]   = 3'd3;   // 3 beats
+    chi_req_data[CHI_REQ_TXNID_LSB  +: CHI_REQ_TXNID_W]  = 8'h66;
+    chi_req_valid = 1'b1;
+    cxl_tx_req_ready = 1'b1;
+    @(posedge clk);
+    while (!chi_req_ready) @(posedge clk);
+    chi_req_valid = 1'b0;
+
+    // Capture the M2S Req: it must carry LEN=3; grab the allocated tag.
+    @(posedge cxl_clk);
+    while (!(cxl_tx_req_valid && cxl_tx_req_ready)) @(posedge cxl_clk);
+    if (cxl_tx_req_data[CXL_REQ_LEN_LSB +: CXL_REQ_LEN_W] !== 3'd3) begin
+      $display("FAIL: M2S Req LEN mismatch got=%h",
+               cxl_tx_req_data[CXL_REQ_LEN_LSB +: CXL_REQ_LEN_W]); $finish(1);
+    end
+    rd_tag = cxl_tx_req_data[CXL_REQ_TAG_LSB +: CXL_REQ_TAG_W];
+    $display("INFO: multi-beat RD M2S Req LEN=3 tag=%h -- feeding 3 DRS beats", rd_tag);
+
+    chi_comp_data_ready = 1'b0;   // hold CHI egress off while we buffer DRS beats
+    for (i = 0; i < 3; i = i + 1) begin
+      @(posedge cxl_clk);
+      cxl_rx_drs_data = {CXL_DRS_W{1'b0}};
+      cxl_rx_drs_data[CXL_DRS_OPCODE_LSB +: CXL_DRS_OPCODE_W] = CXL_DRS_MEMDATA;
+      cxl_rx_drs_data[CXL_DRS_TAG_LSB    +: CXL_DRS_TAG_W]    = rd_tag;
+      cxl_rx_drs_data[CXL_DRS_DATA_LSB   +: 64]               = 64'hD1D1_0000_0000_0000 + i;
+      cxl_rx_drs_valid = 1'b1;
+      @(posedge cxl_clk);
+      while (!cxl_rx_drs_ready) @(posedge cxl_clk);
+    end
+    cxl_rx_drs_valid = 1'b0;
+
+    // Drain CHI CompData and confirm exactly 3 beats, each carrying TxnID 0x66.
+    chi_comp_data_ready = 1'b1;
+    comp_seen = 0;
+    while (comp_seen < 3) begin
+      @(posedge clk);
+      if (chi_comp_data_valid && chi_comp_data_ready) begin
+        if (chi_comp_data[CHI_DAT_TXNID_LSB +: CHI_DAT_TXNID_W] !== 8'h66) begin
+          $display("FAIL: CompData TxnID mismatch beat %0d got=%h", comp_seen,
+                   chi_comp_data[CHI_DAT_TXNID_LSB +: CHI_DAT_TXNID_W]); $finish(1);
+        end
+        comp_seen = comp_seen + 1;
+      end
+    end
+    $display("INFO: multi-beat RD OK -- 3 CompData beats egressed");
+
+    $display("PASS Phase 3a bidirectional smoke tests + multi-beat datapath");
     $finish(0);
   end
 
