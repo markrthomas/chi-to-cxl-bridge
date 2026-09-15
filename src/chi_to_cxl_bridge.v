@@ -443,6 +443,32 @@ module chi_to_cxl_bridge #(
   reg f_wo_v_q, f_wo_r_q, f_wo_vld;
   always_ff @(posedge cxl_clk or negedge cxl_rst_n) if (!cxl_rst_n) begin f_wo_v_q <= 1'b0; f_wo_r_q <= 1'b0; f_wo_vld <= 1'b0; end else begin f_wo_v_q <= cxl_tx_rwd_valid; f_wo_r_q <= cxl_tx_rwd_ready; f_wo_vld <= 1'b1; end
   always @(*) if (cxl_rst_n && f_wo_vld && f_wo_v_q && !f_wo_r_q) assert (cxl_tx_rwd_valid);
+  // --- Multi-beat (runtime-length) burst counters ---------------------------
+  // Write egress: the per-burst beat counter stays within the head request's
+  // runtime length, and is zero whenever no write command is queued. rwd_len =
+  // chi_req_beats(SIZE) is structurally >= 1 for every SIZE encoding, so the
+  // counting invariant closes under k-induction WITHOUT constraining the posted
+  // FIFO's (unconstrained) contents. Together these prove the command pops
+  // exactly once per burst -- on the last beat -- and no data beat is stranded.
+  always @(*) if (cxl_rst_n) begin
+    assert (rwd_len >= 3'd1);
+    assert (rwd_beat_q < rwd_len);
+    if (req_posted_r_empty) assert (rwd_beat_q == 3'd0);
+  end
+  // Read return: a tag is only ever freed on a real CompData handshake, i.e. a
+  // returning DRS beat -- never spuriously. The full "free only on the last of
+  // LEN beats" relation depends on the per-tag length held in the tag-manager
+  // RAM, whose contents are unconstrained under k-induction, so that count
+  // relation is discharged by BMC + the pyuvm / SVA / directed multi-beat runs
+  // rather than asserted in this unbounded prove.
+  always @(*) if (clk_rst_n && release_b_vld) assert (!rsp_drs_r_empty);
+  // (A cover of a full multi-beat burst is not added here: an end-to-end burst
+  // needs bridge-open + the async-FIFO CDC latency + several buffered beats,
+  // which is deeper than this cover engine runs at a tractable depth/memory. The
+  // counter INVARIANTS above are proven k-inductive (never vacuous -- the write
+  // path is reachable, per the reset/req/drain covers), and multi-beat burst
+  // reachability is exercised concretely by the directed tb RD LEN=3 / WR LEN=2
+  // cases and pyuvm test_multibeat.)
   // (SnpResp egress valid/data stability is a sync_fifo-backed passthrough; its
   // stability needs a sync_fifo head-of-line invariant that is not k-inductive
   // under multiclock, so it is checked by the bound SVA `a_snp_resp_stable`

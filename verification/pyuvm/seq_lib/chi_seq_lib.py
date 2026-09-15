@@ -100,6 +100,42 @@ class MultiBeatSeq(uvm_sequence):
             txnid += 1
 
 
+class MultiBeatStressSeq(uvm_sequence):
+    """High-volume interleaved multi-beat stress: many mixed reads/writes of
+    random burst length (1..MAX_BEATS) with distinct TxnIDs, issued in bursts of
+    reads (to build up outstanding transactions past the 16-tag pool and pressure
+    the response FIFOs) interleaved with multi-beat writes. Self-throttles on the
+    bridge's tag-pool/credit backpressure; the scoreboard proves every burst still
+    round-trips with the right per-beat data and length."""
+    def __init__(self, name="MultiBeatStressSeq", rounds=6, per_round=10, seed=7):
+        super().__init__(name)
+        self.rounds = rounds
+        self.per_round = per_round
+        self.seed = seed
+
+    async def body(self):
+        random.seed(self.seed)
+        gen = ChiReqRandom()
+        txnid = 0
+        for _ in range(self.rounds):
+            # A burst of reads first (maximizes outstanding count / tag pressure),
+            # then a few writes, each with a randomized burst length.
+            for _ in range(self.per_round):
+                gen.randomize()
+                op = _READS[gen.opcode % len(_READS)] if gen.is_write else gen.opcode
+                await _send(self, ChiReq(opcode=op, addr=gen.addr,
+                                         txnid=txnid & 0xFF, size=gen.size))
+                txnid = (txnid + 7) & 0xFF
+            for _ in range(max(1, self.per_round // 3)):
+                gen.randomize()
+                op = _WRITES[gen.opcode % len(_WRITES)]
+                await _send(self, ChiReq(opcode=op, addr=gen.addr, txnid=txnid & 0xFF,
+                                         size=gen.size,
+                                         data=(0x9E3779B97F4A7C15 * (txnid + 1))
+                                              & ((1 << 512) - 1)))
+                txnid = (txnid + 7) & 0xFF
+
+
 class RandomSeq(uvm_sequence):
     """Constrained-random read/write mix with distinct TxnIDs (closure / stress).
 
