@@ -24,6 +24,9 @@ doc/build/
 verification/formal/*/
 verification/formal/*_ci.sby
 
+# Structural CDC check build artifacts (verification/cdc)
+verification/cdc/build/
+
 # Common simulation/tool junk
 work/
 *.log

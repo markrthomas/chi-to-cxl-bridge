@@ -1,0 +1,22 @@
+# Flattened netlist for the structural CDC check (tools/cdc_check.py).
+# The sanctioned CDC primitives are kept as BLACKBOXES so the check sees each
+# clk<->cxl_clk crossing as a single vetted boundary; all other logic is
+# flattened into the top so register clock domains are directly visible.
+# Run from verification/cdc/ (paths are relative to it). No -DFORMAL: the check
+# must see the real design, not the formal-only shadow logic.
+read_verilog -sv -I../../src ../../src/async_fifo.v
+read_verilog -sv -I../../src ../../src/sync_fifo.v
+read_verilog -sv -I../../src ../../src/tag_manager.v
+read_verilog -sv -I../../src ../../src/cdc_sync.v
+read_verilog -sv -I../../src ../../src/reset_sync.v
+read_verilog -sv -I../../src ../../src/credit_counter.v
+read_verilog -sv -I../../src ../../src/credit_pulse_sync.v
+read_verilog -sv -I../../src ../../src/reset_drain.v
+read_verilog -sv -I../../src ../../src/chi_to_cxl_bridge.v
+# Keep the vetted crossers opaque; flatten everything else.
+blackbox async_fifo cdc_sync reset_sync credit_pulse_sync
+hierarchy -top chi_to_cxl_bridge
+proc
+flatten
+opt -fast
+write_json build/cdc_net.json

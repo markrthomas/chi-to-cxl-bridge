@@ -18,7 +18,7 @@ COV_DIR := build/coverage
 # Minimum line-coverage floor enforced by `make coverage` (DV_STANDARDS.md).
 COV_MIN ?= 80
 
-.PHONY: help lint verible-lint verible-format sim regress stress vcd gtkwave waves wave coverage sva formal formal-fullwidth synth ci cocotb pyuvm fcov uvm uvm-lint trace-check trace-golden clean
+.PHONY: help lint verible-lint verible-format sim regress stress vcd gtkwave waves wave coverage sva formal formal-fullwidth cdc synth ci cocotb pyuvm fcov uvm uvm-lint trace-check trace-golden clean
 
 # Verible style-lint / format target the synthesizable RTL (the rtl.f source list).
 VERIBLE_SRCS  := $(BRIDGE_SRCS)
@@ -46,6 +46,7 @@ help:
 	@echo "  make uvm-lint  — elaborate the SV-UVM env (needs UVM_HOME; verification/uvm/vlt)"
 	@echo "  make waves     — FST waveform of a pyuvm run (build/waves/<MODULE>.fst)"
 	@echo "  make formal    — SymbiYosys BMC + cover (credit_counter, reset_drain, async_fifo, bridge top)"
+	@echo "  make cdc       — structural clock-domain-crossing check (+ self-test)"
 	@echo "  make synth     — Yosys synthesis smoke (catch latches, area stats)"
 	@echo "  make cocotb    — alias for 'make pyuvm'"
 	@echo "  make ci        — regress + pyuvm + fcov + coverage + sva + formal + synth (comprehensive)"
@@ -184,6 +185,13 @@ formal:
 # bitwuzla (keeps the wide FIFO memories as SMT arrays). Separate from `formal`.
 formal-fullwidth:
 	$(MAKE) -C verification/formal chi_to_cxl_bridge_fullwidth
+
+# cdc: structural clock-domain-crossing check (Yosys flattened netlist + a
+# domain-cone analysis in tools/cdc_check.py). Proves every clk<->cxl_clk
+# crossing goes through a sanctioned CDC primitive; includes a self-test that
+# the checker flags a known-bad crossing.
+cdc:
+	$(MAKE) -C verification/cdc
 
 # synth: Yosys synthesis smoke test. Checks for inferred latches and tracks area.
 synth:

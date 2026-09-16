@@ -205,12 +205,18 @@ formal / formal-fullwidth / synth / uvm-lint / verible).
 
 Build out and then exhaustively verify the error-handling paths.
 
-- [ ] **5.0 CDC-lint gate (early checker).** Add a structural clock-domain-crossing
-      check (Verilator `--timing`/CDC or a Yosys `cdc`-based pass, or
-      `verilator --lint-only -Wall` with a CDC ruleset) over the three async-FIFO
-      crossings + the `cdc_sync`/`reset_sync` synchronizers, as a new `make cdc`
-      target and CI job. Cheap, RTL-independent, and a permanent guard for the
-      feature work that follows.
+- [x] **5.0 CDC-lint gate (early checker).** `make cdc` (`verification/cdc/`)
+      builds a flattened Yosys JSON netlist with the sanctioned CDC primitives
+      (`async_fifo`, `cdc_sync`, `reset_sync`, `credit_pulse_sync`) kept as
+      blackboxes, and `tools/cdc_check.py` proves the structural property: no
+      register's data/enable/reset cone reaches a register (or RAM read) in the
+      other clock domain except through one of those primitives — i.e. every
+      crossing uses a vetted synchronizer and inline crossings are rejected. A
+      `selftest` asserts the checker FLAGS a known-bad crossing
+      (`bad_cdc_fixture.v`) so the gate can never go vacuous. New `cdc` CI job;
+      a permanent guard for the feature work that follows. (Scope: it trusts the
+      primitives' internal correctness, which the standalone async_fifo/cdc_sync
+      formal proofs already cover.)
 - [ ] **5.1 Re-plumb flit integrity.** Add a CRC/parity field to the CHI/CXL flit
       maps (defs), generate it on ingress and check it on egress, and drive the
       dead `err_inj_en` injector to corrupt a flit so the checker fires. Increment
