@@ -88,8 +88,15 @@ Implemented and green locally:
       address) that `RandomSeq` / `test_random` draw from, replacing the ad-hoc
       `random`-module builders. (cocotb_coverage is therefore a core pyuvm-tier
       dependency now, not fcov-only.)
-- [ ] Closed-loop coverage-driven generation (bias the crv toward uncovered
-      bins) — a further refinement.
+- [x] Closed-loop coverage-driven generation. `seq_lib.CoverageDrivenSeq` reads
+      the LIVE `cocotb_coverage` DB before each transaction and soft-biases the
+      `ChiReqRandom` crv (via `randomize_with` numeric-weight constraints) toward
+      the request opcode / burst-length bins still uncovered — every other point
+      is downstream of those, so this closes the whole generation-reachable set.
+      `test_cov_driven` proves purely random stimulus + coverage feedback (no
+      directed round-trip) reaches **100%** in the theoretical-minimum **5**
+      transactions, and it is gated under `make fcov`. Coverage-DB query helpers
+      live in `coverage_model.uncovered_opcodes()` / `uncovered_beats()`.
 
 ## Phase 3 — protocol fidelity
 

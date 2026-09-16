@@ -112,11 +112,14 @@ pyuvm:
 cocotb: pyuvm
 
 # fcov: independent functional coverage (cocotb_coverage). Each test asserts 100%
-# of its bin set. test_fcov = REQ/MemOpcode/RSP/CompData; test_backpressure =
-# the stall / near-full / FIFO-occupancy covergroup. Runs on Icarus in CI.
+# of its bin set. test_fcov = REQ/MemOpcode/RSP/CompData/beats (directed);
+# test_cov_driven = the same set closed by closed-loop coverage-driven random;
+# test_backpressure = the stall / near-full / FIFO-occupancy covergroup;
+# test_snoop = the snoop-opcode covergroup. Runs on Icarus in CI.
 FCOV_SIM ?= verilator
 fcov:
 	$(MAKE) -C $(PYUVM_DIR) MODULE=test_fcov SIM=$(FCOV_SIM)
+	$(MAKE) -C $(PYUVM_DIR) MODULE=test_cov_driven SIM=$(FCOV_SIM)
 	$(MAKE) -C $(PYUVM_DIR) MODULE=test_backpressure SIM=$(FCOV_SIM)
 	$(MAKE) -C $(PYUVM_DIR) MODULE=test_snoop SIM=$(FCOV_SIM)
 

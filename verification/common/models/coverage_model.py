@@ -116,6 +116,30 @@ def overall():
     return hit, total, (100.0 * hit / total if total else 0.0)
 
 
+# ---- coverage feedback for closed-loop, coverage-driven generation ----------
+# The stimulus generator controls the CHI request opcode and burst length; every
+# other point in POINTS is downstream of those (the translated MemOpcode, the RSP
+# opcodes from writes, CompData from reads), so biasing generation toward
+# uncovered opcode / burst-length bins closes the whole generation-reachable set.
+def uncovered_opcodes():
+    """REQ opcode VALUES not yet hit (all of them if nothing sampled yet)."""
+    name = "bridge.chi.req_opcode"
+    if name not in coverage_db:
+        return list(REQ_OPS)
+    lab2op = dict(zip(REQ_LABELS, REQ_OPS))
+    dc = coverage_db[name].detailed_coverage          # {label: hits}
+    return [lab2op[lab] for lab, hits in dc.items() if hits == 0 and lab in lab2op]
+
+
+def uncovered_beats():
+    """Burst-length bin VALUES (1..MAX_BEATS) not yet hit."""
+    name = "bridge.chi.req_beats"
+    if name not in coverage_db:
+        return list(BEATS)
+    dc = coverage_db[name].detailed_coverage          # {beat_value: hits}
+    return [b for b, hits in dc.items() if hits == 0]
+
+
 SNP_POINTS = ["bridge.chi.snp_opcode"]
 SNP_OPS = [bm.CHI_SNP_SNPONCE, bm.CHI_SNP_SNPSHARED, bm.CHI_SNP_SNPUNIQUE]
 
