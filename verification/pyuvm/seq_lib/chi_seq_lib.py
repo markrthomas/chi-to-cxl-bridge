@@ -7,9 +7,12 @@ outstanding), and addresses are 64-byte aligned.
 """
 import random
 
+import cocotb
+from cocotb.triggers import RisingEdge
 from cocotb_coverage.crv import Randomized
 from pyuvm import uvm_sequence
 import bridge_model as bm
+import coverage_model as cov
 from agents.chi_cxl_agent import ChiReq
 
 _READS = [bm.CHI_REQ_READNOSNP, bm.CHI_REQ_READONCE]
@@ -134,6 +137,53 @@ class MultiBeatStressSeq(uvm_sequence):
                                          data=(0x9E3779B97F4A7C15 * (txnid + 1))
                                               & ((1 << 512) - 1)))
                 txnid = (txnid + 7) & 0xFF
+
+
+class CoverageDrivenSeq(uvm_sequence):
+    """Closed-loop, coverage-driven generation (PLAN Phase 2).
+
+    Before each transaction, read the LIVE functional-coverage DB and soft-bias
+    the crv toward the request opcode / burst-length bins still uncovered, so the
+    random stream converges on 100% of the generation-reachable functional set
+    quickly and deterministically -- instead of relying on blind randomness to
+    eventually stumble into every bin. Stops as soon as the generation-reachable
+    bins are all hit; `hit_at` records how many transactions that took.
+    """
+    def __init__(self, name="CoverageDrivenSeq", max_txns=64, seed=3):
+        super().__init__(name)
+        self.max_txns = max_txns
+        self.seed = seed
+        self.hit_at = None          # #txns at which opcode+beats bins all closed
+
+    async def body(self):
+        random.seed(self.seed)
+        gen = ChiReqRandom()
+        dut = cocotb.top
+        txnid = 0
+        for i in range(self.max_txns):
+            unc_ops = cov.uncovered_opcodes()
+            unc_beats = cov.uncovered_beats()
+            if not unc_ops and not unc_beats:
+                self.hit_at = i
+                break
+            # Soft (numeric-weight) constraints: heavily favour an uncovered
+            # opcode / burst length, but stay satisfiable once a set is closed.
+            gen.randomize_with(
+                lambda opcode: 50 if opcode in unc_ops else 1,
+                lambda size: 50 if size in unc_beats else 1)
+            # crv returns numpy scalars; cast to plain int for handle assignment.
+            opcode, size, addr = int(gen.opcode), int(gen.size), int(gen.addr)
+            data = ((0x9E3779B97F4A7C15 * (txnid + 1)) & ((1 << 512) - 1)
+                    if bm.is_write(opcode) else 0)
+            await _send(self, ChiReq(opcode=opcode, addr=addr,
+                                     txnid=txnid & 0xFF, data=data, size=size))
+            txnid = (txnid + 7) & 0xFF
+            # Let the request-side observer sample this transaction before the
+            # next generation decision reads the coverage DB.
+            for _ in range(3):
+                await RisingEdge(dut.clk)
+        if self.hit_at is None and not cov.uncovered_opcodes() and not cov.uncovered_beats():
+            self.hit_at = self.max_txns
 
 
 class RandomSeq(uvm_sequence):
