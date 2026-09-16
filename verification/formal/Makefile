@@ -6,7 +6,8 @@
 
 SBY ?= sby
 
-.PHONY: all credit_counter reset_drain async_fifo sync_fifo chi_to_cxl_bridge clean
+.PHONY: all credit_counter reset_drain async_fifo sync_fifo chi_to_cxl_bridge \
+        chi_to_cxl_bridge_fullwidth clean
 
 all: credit_counter reset_drain async_fifo sync_fifo chi_to_cxl_bridge
 	@echo "[FORMAL] All SymbiYosys checks passed."
@@ -31,10 +32,19 @@ chi_to_cxl_bridge:
 	$(SBY) -f chi_to_cxl_bridge.sby
 	@echo "[FORMAL] chi_to_cxl_bridge: PASS (bmc depth 24 + cover + unbounded prove)"
 
+# Full 512-bit datapath width (no FORMAL_SMALL_DATA); bitwuzla keeps the wide
+# FIFO memories as SMT arrays so the same properties close at full width. Kept
+# out of `all` (and the small-memory `formal` CI job) -- run by `make
+# formal-fullwidth` / the dedicated formal-fullwidth CI job.
+chi_to_cxl_bridge_fullwidth:
+	$(SBY) -f chi_to_cxl_bridge_fullwidth.sby
+	@echo "[FORMAL] chi_to_cxl_bridge (full 512-bit width): PASS (bmc depth 24 + unbounded prove)"
+
 clean:
 	rm -rf credit_counter_bmc credit_counter_cover credit_counter_prove \
 	       reset_drain_bmc reset_drain_cover reset_drain_prove \
 	       async_fifo_bmc async_fifo_cover async_fifo_prove \
 	       sync_fifo_bmc sync_fifo_cover sync_fifo_prove \
 	       chi_to_cxl_bridge_bmc chi_to_cxl_bridge_cover chi_to_cxl_bridge_prove \
+	       chi_to_cxl_bridge_fullwidth_bmc chi_to_cxl_bridge_fullwidth_prove \
 	       credit_counter_ci.sby reset_drain_ci.sby chi_to_cxl_bridge_ci.sby

@@ -18,7 +18,7 @@ COV_DIR := build/coverage
 # Minimum line-coverage floor enforced by `make coverage` (DV_STANDARDS.md).
 COV_MIN ?= 80
 
-.PHONY: help lint verible-lint verible-format sim regress stress vcd gtkwave waves wave coverage sva formal synth ci cocotb pyuvm fcov uvm uvm-lint trace-check trace-golden clean
+.PHONY: help lint verible-lint verible-format sim regress stress vcd gtkwave waves wave coverage sva formal formal-fullwidth synth ci cocotb pyuvm fcov uvm uvm-lint trace-check trace-golden clean
 
 # Verible style-lint / format target the synthesizable RTL (the rtl.f source list).
 VERIBLE_SRCS  := $(BRIDGE_SRCS)
@@ -176,6 +176,11 @@ trace-golden:
 # SymbiYosys formal verification (requires OSS CAD Suite or standalone sby).
 formal:
 	$(MAKE) -C verification/formal
+
+# Full 512-bit-width re-run of the bridge-top proof (no data abstraction), via
+# bitwuzla (keeps the wide FIFO memories as SMT arrays). Separate from `formal`.
+formal-fullwidth:
+	$(MAKE) -C verification/formal chi_to_cxl_bridge_fullwidth
 
 # synth: Yosys synthesis smoke test. Checks for inferred latches and tracks area.
 synth:

@@ -59,8 +59,16 @@ Implemented and green locally:
     width-independent, so the bridge `.sby` shrinks the 512-bit beat to keep the
     unbounded SMT proof within memory; sim / coverage / SVA / synth keep 512.
 - [x] `prove` gated in CI via the `formal` job (runs the full `make formal`).
-- [ ] Full-width unbounded `prove` (no data abstraction) if a higher-memory
-      runner / FIFO-memory abstraction is set up — currently sim covers full width.
+- [x] Full-width unbounded `prove` (no data abstraction). The same
+      width-independent safety properties now also close at the FULL 512-bit
+      datapath width — `chi_to_cxl_bridge_fullwidth.sby` drops `FORMAL_SMALL_DATA`
+      and switches the engine to `smtbmc bitwuzla`, which keeps the wide FIFO
+      memories as SMT arrays instead of bit-blasting them (the default engine's
+      blasting is what OOMed at 512 bits). bmc depth 24 + unbounded prove, both
+      pass by k-induction (~2 min each). Run by `make formal-fullwidth` and the
+      dedicated `formal-fullwidth` CI job; kept out of the lean primary `formal`
+      gate. (The engine change made it tractable even on a small machine, so no
+      special high-memory runner was ultimately needed.)
 
 ## Phase 2 — functional coverage (now PyUVM-on-cocotb)
 

@@ -140,6 +140,24 @@ jobs:
       - name: SymbiYosys formal (infra modules proven; bridge top bmc + cover)
         run: make formal
 
+  # Full 512-bit-datapath-width re-run of the bridge-top proof (no
+  # FORMAL_SMALL_DATA). bitwuzla keeps the wide FIFO memories as SMT arrays, so
+  # the same width-independent safety properties close at full width by
+  # k-induction. Split from `formal` so the primary formal gate stays lean.
+  formal-fullwidth:
+    needs: regress
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: YosysHQ/setup-oss-cad-suite@v4
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          version: ${{ env.OSS_CAD_SUITE_VERSION }}
+
+      - name: SymbiYosys formal at full 512-bit datapath width (bmc + unbounded prove)
+        run: make formal-fullwidth
+
   synth:
     needs: regress
     runs-on: ubuntu-latest
