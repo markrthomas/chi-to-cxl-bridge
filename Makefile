@@ -18,7 +18,7 @@ COV_DIR := build/coverage
 # Minimum line-coverage floor enforced by `make coverage` (DV_STANDARDS.md).
 COV_MIN ?= 80
 
-.PHONY: help lint verible-lint verible-format sim regress stress vcd gtkwave waves wave coverage sva formal formal-fullwidth cdc synth ci cocotb pyuvm fcov uvm uvm-lint trace-check trace-golden clean
+.PHONY: help lint verible-lint verible-format sim regress check test stress vcd gtkwave waves wave coverage sva formal formal-fullwidth cdc synth ci cocotb pyuvm fcov uvm uvm-lint trace-check trace-golden clean
 
 # Verible style-lint / format target the synthesizable RTL (the rtl.f source list).
 VERIBLE_SRCS  := $(BRIDGE_SRCS)
@@ -38,6 +38,7 @@ help:
 	@echo "  make stress    — Icarus simulation with heavy backpressure stress"
 	@echo "  make vcd       — Icarus sim dumping a VCD (verification/directed/build/waves.vcd)"
 	@echo "  make gtkwave   — make vcd, then open the VCD in GTKWave"
+	@echo "  make check     — lint + sim (light local gate; see DV_STANDARDS.md)"
 	@echo "  make regress   — lint + sim (fast CI gate)"
 	@echo "  make pyuvm     — PyUVM-on-cocotb functional tier (round-trip + random, scoreboard)"
 	@echo "  make fcov      — functional + backpressure coverage (cocotb_coverage, 100%-gated)"
@@ -49,6 +50,7 @@ help:
 	@echo "  make cdc       — structural clock-domain-crossing check (+ self-test)"
 	@echo "  make synth     — Yosys synthesis smoke (catch latches, area stats)"
 	@echo "  make cocotb    — alias for 'make pyuvm'"
+	@echo "  make test      — alias for 'make pyuvm' (cross-repo name; see DV_STANDARDS.md)"
 	@echo "  make ci        — regress + pyuvm + fcov + coverage + sva + formal + synth (comprehensive)"
 	@echo "  make clean     — remove simulation build artifacts"
 	@echo ""
@@ -89,6 +91,10 @@ vcd:
 gtkwave:
 	$(MAKE) -C verification/directed gtkwave
 
+# check: light local gate, fast enough to run on every save (DV_STANDARDS.md).
+check: lint sim
+	@echo "[CHECK] lint + directed sim PASSED"
+
 # fast CI gate.
 regress: lint sim
 	@echo "[REGRESS] lint + directed sim PASSED"
@@ -111,6 +117,9 @@ pyuvm:
 
 # cocotb: back-compat alias for the pyuvm functional tier.
 cocotb: pyuvm
+
+# test: cross-repo alias for the pyuvm functional tier (DV_STANDARDS.md).
+test: pyuvm
 
 # fcov: independent functional coverage (cocotb_coverage). Each test asserts 100%
 # of its bin set. test_fcov = REQ/MemOpcode/RSP/CompData/beats (directed);
