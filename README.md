@@ -135,9 +135,11 @@ directions:
 All standard gates are exposed from the repo root (`make help` lists them):
 
 ```bash
+make check       # lint + sim (light local gate, run on every save)
 make regress     # Verilator lint + Icarus directed simulation (fast gate)
 make stress      # directed sim with heavy backpressure
 make pyuvm       # PyUVM-on-cocotb functional tier (round-trip + random, scoreboard cross-check)
+make test        # alias for 'make pyuvm' (cross-repo name)
 make fcov        # independent functional coverage (cocotb_coverage); gates at 100%
 make coverage    # Verilator --coverage-line on the pyuvm run (fails below 80% line floor)
 make sva         # bound SVA checked under the pyuvm run (Verilator --assert)
@@ -181,6 +183,7 @@ stress), then fans out to parallel jobs that each depend on it:
 - **PyUVM tier**: [verification/pyuvm/](verification/pyuvm/) — env, agent, sequences, and tests (aligned with `../ucie2-pipe7-bridge/dv/pyuvm`).
 - **SV-UVM tier**: [verification/uvm/](verification/uvm/) — a SystemVerilog UVM env on the `chi_to_cxl_if` bundle (`make -C verification/uvm/vlt lint UVM_HOME=…`); elaborates on OSS Verilator, `--binary` run on a large runner.
 - **Plan**: [doc/PLAN.md](doc/PLAN.md) — current state and phased roadmap.
+- **DV Standards**: [DV_STANDARDS.md](DV_STANDARDS.md) — the common `make` target vocabulary shared across this maintainer's RTL/DV repos.
 
 ## Known Limits
 
