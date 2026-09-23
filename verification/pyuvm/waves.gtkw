@@ -1,0 +1,84 @@
+[*]
+[*] chi_to_cxl_bridge — curated GTKWave layout for the top-level DUT interface.
+[*] Opened by `make wave` (root Makefile) against build/waves/<MODULE>.fst;
+[*] default MODULE is test_random. Regenerate signal names here if the DUT's
+[*] top-level port list changes.
+[dumpfile] "build/waves/test_random.fst"
+[timestart] 0
+[size] 1600 1000
+[pos] -1 -1
+[sst_width] 300
+[signals_width] 300
+[sst_expanded] 1
+[sst_vpaneldir] 2
+@28
+-Clock & Reset
+chi_to_cxl_bridge.clk
+chi_to_cxl_bridge.cxl_clk
+chi_to_cxl_bridge.rst_n
+chi_to_cxl_bridge.link_up
+-CHI Request In (REQ + WD)
+chi_to_cxl_bridge.chi_req_valid
+chi_to_cxl_bridge.chi_req_ready
+@22
+chi_to_cxl_bridge.chi_req_data
+@28
+chi_to_cxl_bridge.chi_wr_data_valid
+chi_to_cxl_bridge.chi_wr_data_ready
+@22
+chi_to_cxl_bridge.chi_wr_data
+@28
+-CXL.mem TX (bridge -> CXL: req/rwd)
+chi_to_cxl_bridge.cxl_tx_req_valid
+chi_to_cxl_bridge.cxl_tx_req_ready
+@22
+chi_to_cxl_bridge.cxl_tx_req_data
+@28
+chi_to_cxl_bridge.cxl_tx_rwd_valid
+chi_to_cxl_bridge.cxl_tx_rwd_ready
+@22
+chi_to_cxl_bridge.cxl_tx_rwd_data
+@28
+-CXL.mem RX (CXL -> bridge: ndr/drs)
+chi_to_cxl_bridge.cxl_rx_ndr_valid
+chi_to_cxl_bridge.cxl_rx_ndr_ready
+@22
+chi_to_cxl_bridge.cxl_rx_ndr_data
+@28
+chi_to_cxl_bridge.cxl_rx_drs_valid
+chi_to_cxl_bridge.cxl_rx_drs_ready
+@22
+chi_to_cxl_bridge.cxl_rx_drs_data
+@28
+-CHI Response Out (RSP + CompData)
+chi_to_cxl_bridge.chi_rsp_valid
+chi_to_cxl_bridge.chi_rsp_ready
+@22
+chi_to_cxl_bridge.chi_rsp_data
+@28
+chi_to_cxl_bridge.chi_comp_data_valid
+chi_to_cxl_bridge.chi_comp_data_ready
+@22
+chi_to_cxl_bridge.chi_comp_data
+@28
+-CHI Snoop (SNP in / SnpResp out)
+chi_to_cxl_bridge.chi_snp_valid
+chi_to_cxl_bridge.chi_snp_ready
+@22
+chi_to_cxl_bridge.chi_snp_data
+@28
+chi_to_cxl_bridge.chi_snp_resp_valid
+chi_to_cxl_bridge.chi_snp_resp_ready
+@22
+chi_to_cxl_bridge.chi_snp_resp_data
+@28
+-Error Injection & Status Counters
+chi_to_cxl_bridge.err_inj_en
+chi_to_cxl_bridge.drain_done
+@22
+chi_to_cxl_bridge.crc_err_cnt
+chi_to_cxl_bridge.drain_cnt
+chi_to_cxl_bridge.max_occ_req
+chi_to_cxl_bridge.max_occ_rsp
+[pattern_trace] 1
+[pattern_trace] 0
