@@ -2,7 +2,8 @@
 
 Runs a randomized read/write mix (distinct TxnIDs) through the full PyUVM env; the
 same cross-check scoreboard proves round-trip identity + translation. Kept in its
-own module so it runs in a clean simulation (one PyUVM test per cocotb run).
+own module so it runs in a clean simulation (one PyUVM test per cocotb run). This
+is the default `make`/`make wave` target for the pyuvm tier (no MODULE specified).
 """
 import cocotb
 import pyuvm

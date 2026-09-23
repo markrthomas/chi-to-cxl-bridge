@@ -5,7 +5,8 @@
 # the shared repo-root rtl.f, and exposes opt-in RTL line-coverage, bound-SVA, and
 # waveform builds that leave the plain functional gate byte-for-byte unchanged.
 #
-#   make                 # default: directed read/write round-trip (test_roundtrip)
+#   make                 # default: randomized read/write mix (test_random, >=5 txns)
+#   make MODULE=test_roundtrip
 #   make MODULE=test_smoke
 #   make SIM=icarus      # pick a simulator (default: verilator)
 #   make RTL_COVERAGE=1   # + verilator --coverage-line (root `make coverage`)
@@ -22,7 +23,7 @@ SRC  := $(ROOT)/src
 VERILOG_SOURCES := $(addprefix $(ROOT)/,$(shell grep -vE '^[[:space:]]*(#|$$)' $(ROOT)/rtl.f))
 
 TOPLEVEL ?= chi_to_cxl_bridge
-MODULE   ?= test_roundtrip
+MODULE   ?= test_random
 
 # Shared gold models + trace/coverage contract importable from the tests.
 export PYTHONPATH := $(abspath .):$(abspath ../common/models):$(PYTHONPATH)

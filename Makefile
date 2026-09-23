@@ -45,7 +45,8 @@ help:
 	@echo "  make coverage  — Verilator --coverage-line on the pyuvm run (fails below COV_MIN=$(COV_MIN)% lines)"
 	@echo "  make sva       — bound SVA checked under the pyuvm run (Verilator --assert)"
 	@echo "  make uvm-lint  — elaborate the SV-UVM env (needs UVM_HOME; verification/uvm/vlt)"
-	@echo "  make waves     — FST waveform of a pyuvm run (build/waves/<MODULE>.fst)"
+	@echo "  make waves     — FST waveform of a pyuvm run (build/waves/<MODULE>.fst); MODULE default: test_random"
+	@echo "  make wave      — make waves + open it in GTKWave with the curated $(PYUVM_DIR)/waves.gtkw layout"
 	@echo "  make formal    — SymbiYosys BMC + cover (credit_counter, reset_drain, async_fifo, bridge top)"
 	@echo "  make cdc       — structural clock-domain-crossing check (+ self-test)"
 	@echo "  make synth     — Yosys synthesis smoke (catch latches, area stats)"
@@ -160,15 +161,19 @@ sva:
 	@echo "[SVA] bound-checker properties held during the round-trip + snoop runs"
 
 # waves: FST waveform of a pyuvm run (Verilator --trace-fst, WAVES=1 build).
-# Opt-in and out of the gate; writes build/waves/<MODULE>.fst.
-WAVE_MODULE ?= test_roundtrip
+# Opt-in and out of the gate; writes build/waves/<MODULE>.fst. Defaults to the
+# randomized test_random (same default as the bare `make -C verification/pyuvm`).
+WAVE_MODULE ?= test_random
 WAVE_FST    := build/waves/$(WAVE_MODULE).fst
+GTKW_SAVE   := $(PYUVM_DIR)/waves.gtkw
 waves:
 	$(MAKE) -C $(PYUVM_DIR) WAVES=1 SIM=verilator MODULE=$(WAVE_MODULE)
 	@[ -s $(WAVE_FST) ] && echo "[WAVES] wrote $(WAVE_FST)" || { echo "[WAVES] ERROR: no FST at $(WAVE_FST)"; exit 1; }
 
+# wave: make waves, then open it in GTKWave with the curated signal-grouping
+# layout (clock/reset, CHI req/wrdata, CXL tx/rx, CHI rsp/compdata, snoop, status).
 wave: waves
-	gtkwave $(WAVE_FST)
+	gtkwave $(WAVE_FST) $(GTKW_SAVE)
 
 # trace-check: regenerate the canonical smoke trace under Verilator and diff it
 # against the committed golden (verification/pyuvm/golden/bridge.trace), catching

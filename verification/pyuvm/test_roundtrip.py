@@ -2,7 +2,8 @@
 
 Brings up both clock domains + the link, runs the directed read/write mix through
 the full PyUVM env, and lets the cross-check scoreboard prove round-trip identity
-and request translation against the independent Python gold model. This is the
+and request translation against the independent Python gold model. Select it
+explicitly with `make MODULE=test_roundtrip`; the randomized test_random is the
 default `make` target for the pyuvm tier (mirrors dv/pyuvm/test_roundtrip.py).
 """
 import cocotb
