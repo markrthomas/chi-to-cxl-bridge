@@ -167,13 +167,25 @@ WAVE_MODULE ?= test_random
 WAVE_FST    := build/waves/$(WAVE_MODULE).fst
 GTKW_SAVE   := $(PYUVM_DIR)/waves.gtkw
 waves:
+	@mkdir -p $(dir $(WAVE_FST))   # Verilator's FST writer won't create it (fresh clone)
 	$(MAKE) -C $(PYUVM_DIR) WAVES=1 SIM=verilator MODULE=$(WAVE_MODULE)
 	@[ -s $(WAVE_FST) ] && echo "[WAVES] wrote $(WAVE_FST)" || { echo "[WAVES] ERROR: no FST at $(WAVE_FST)"; exit 1; }
 
-# wave: make waves, then open it in GTKWave with the curated signal-grouping
-# layout (clock/reset, CHI req/wrdata, CXL tx/rx, CHI rsp/compdata, snoop, status).
-wave: waves
-	gtkwave $(WAVE_FST) $(GTKW_SAVE)
+# wave: one random run end to end. make waves with a fresh random TEST_SEED
+# for test_random (printed; SEED=<n> replays; plain `make waves` and the gate
+# keep the fixed seed), then GTKWave with the curated signal-grouping layout
+# (clock/reset, CHI req/wrdata, CXL tx/rx, CHI rsp/compdata, snoop, status),
+# zoomed to fit (verification/pyuvm/zoom_full.tcl). No gtkwave is a clean skip.
+WAVE_SEED := $(or $(SEED),$(shell echo $$(( $$(od -An -N4 -tu4 /dev/urandom) % 2147483646 + 1 ))))
+wave:
+	@echo "[WAVE] $(WAVE_MODULE) with random seed: SEED=$(WAVE_SEED)"
+	TEST_SEED=$(WAVE_SEED) $(MAKE) waves
+	@if command -v gtkwave >/dev/null 2>&1; then \
+		echo "[WAVE] opening $(WAVE_FST) with $(GTKW_SAVE)"; \
+		exec gtkwave -S $(PYUVM_DIR)/zoom_full.tcl $(WAVE_FST) $(GTKW_SAVE); \
+	else \
+		echo "[WAVE] gtkwave not on PATH — dump is at $(WAVE_FST) (layout: $(GTKW_SAVE))"; \
+	fi
 
 # trace-check: regenerate the canonical smoke trace under Verilator and diff it
 # against the committed golden (verification/pyuvm/golden/bridge.trace), catching
