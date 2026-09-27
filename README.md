@@ -146,6 +146,8 @@ make sva         # bound SVA checked under the pyuvm run (Verilator --assert)
 make formal      # SymbiYosys: infra modules proven + bridge top bmc/cover
 make synth       # Yosys synthesis smoke (catch latches, area stats)
 make waves       # FST waveform of a pyuvm run -> build/waves/<MODULE>.fst
+make wave        # test_random with a fresh seed (SEED=<n> replays) -> FST, opened in GTKWave
+                 #   with verification/pyuvm/waves.gtkw, zoomed to fit
 make trace-check # diff the canonical smoke trace against the committed golden
 make ci          # regress + pyuvm + fcov + coverage + sva + formal + synth (comprehensive)
 ```

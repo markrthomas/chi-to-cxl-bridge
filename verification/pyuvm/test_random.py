@@ -5,6 +5,8 @@ same cross-check scoreboard proves round-trip identity + translation. Kept in it
 own module so it runs in a clean simulation (one PyUVM test per cocotb run). This
 is the default `make`/`make wave` target for the pyuvm tier (no MODULE specified).
 """
+import os
+
 import cocotb
 import pyuvm
 from pyuvm import uvm_test, ConfigDB
@@ -24,6 +26,11 @@ class RandomTest(uvm_test):
         dut = cocotb.top
         await bringup(dut)
         seqr = ConfigDB().get(self, "", "CHI_SEQR")
-        await RandomSeq("random", n=24, seed=2).start(seqr)
+        # Fixed seed 2 for the reproducible gate; TEST_SEED overrides it (root
+        # `make wave` sets a fresh one each run and prints it for replay).
+        env_seed = os.environ.get("TEST_SEED", "")
+        seed = int(env_seed, 0) if env_seed else 2
+        self.logger.info(f"RandomSeq seed = {seed}" + (" (from TEST_SEED)" if env_seed else ""))
+        await RandomSeq("random", n=24, seed=seed).start(seqr)
         await quiesce(dut, 400)
         self.drop_objection()

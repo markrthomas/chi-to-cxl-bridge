@@ -21,64 +21,64 @@ chi_to_cxl_bridge.link_up
 chi_to_cxl_bridge.chi_req_valid
 chi_to_cxl_bridge.chi_req_ready
 @22
-chi_to_cxl_bridge.chi_req_data
+chi_to_cxl_bridge.chi_req_data[89:0]
 @28
 chi_to_cxl_bridge.chi_wr_data_valid
 chi_to_cxl_bridge.chi_wr_data_ready
 @22
-chi_to_cxl_bridge.chi_wr_data
+chi_to_cxl_bridge.chi_wr_data[597:0]
 @28
 -CXL.mem TX (bridge -> CXL: req/rwd)
 chi_to_cxl_bridge.cxl_tx_req_valid
 chi_to_cxl_bridge.cxl_tx_req_ready
 @22
-chi_to_cxl_bridge.cxl_tx_req_data
+chi_to_cxl_bridge.cxl_tx_req_data[67:0]
 @28
 chi_to_cxl_bridge.cxl_tx_rwd_valid
 chi_to_cxl_bridge.cxl_tx_rwd_ready
 @22
-chi_to_cxl_bridge.cxl_tx_rwd_data
+chi_to_cxl_bridge.cxl_tx_rwd_data[639:0]
 @28
 -CXL.mem RX (CXL -> bridge: ndr/drs)
 chi_to_cxl_bridge.cxl_rx_ndr_valid
 chi_to_cxl_bridge.cxl_rx_ndr_ready
 @22
-chi_to_cxl_bridge.cxl_rx_ndr_data
+chi_to_cxl_bridge.cxl_rx_ndr_data[12:0]
 @28
 chi_to_cxl_bridge.cxl_rx_drs_valid
 chi_to_cxl_bridge.cxl_rx_drs_ready
 @22
-chi_to_cxl_bridge.cxl_rx_drs_data
+chi_to_cxl_bridge.cxl_rx_drs_data[525:0]
 @28
 -CHI Response Out (RSP + CompData)
 chi_to_cxl_bridge.chi_rsp_valid
 chi_to_cxl_bridge.chi_rsp_ready
 @22
-chi_to_cxl_bridge.chi_rsp_data
+chi_to_cxl_bridge.chi_rsp_data[24:0]
 @28
 chi_to_cxl_bridge.chi_comp_data_valid
 chi_to_cxl_bridge.chi_comp_data_ready
 @22
-chi_to_cxl_bridge.chi_comp_data
+chi_to_cxl_bridge.chi_comp_data[597:0]
 @28
 -CHI Snoop (SNP in / SnpResp out)
 chi_to_cxl_bridge.chi_snp_valid
 chi_to_cxl_bridge.chi_snp_ready
 @22
-chi_to_cxl_bridge.chi_snp_data
+chi_to_cxl_bridge.chi_snp_data[67:0]
 @28
 chi_to_cxl_bridge.chi_snp_resp_valid
 chi_to_cxl_bridge.chi_snp_resp_ready
 @22
-chi_to_cxl_bridge.chi_snp_resp_data
+chi_to_cxl_bridge.chi_snp_resp_data[23:0]
 @28
 -Error Injection & Status Counters
 chi_to_cxl_bridge.err_inj_en
 chi_to_cxl_bridge.drain_done
 @22
-chi_to_cxl_bridge.crc_err_cnt
-chi_to_cxl_bridge.drain_cnt
-chi_to_cxl_bridge.max_occ_req
-chi_to_cxl_bridge.max_occ_rsp
+chi_to_cxl_bridge.crc_err_cnt[15:0]
+chi_to_cxl_bridge.drain_cnt[15:0]
+chi_to_cxl_bridge.max_occ_req[7:0]
+chi_to_cxl_bridge.max_occ_rsp[7:0]
 [pattern_trace] 1
 [pattern_trace] 0

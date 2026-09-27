@@ -47,3 +47,6 @@ NOTES
 
 # SV-UVM (Verilator) build artifacts
 verification/uvm/vlt/obj/
+
+# root make waves / make wave output
+build/waves/
