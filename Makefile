@@ -205,7 +205,11 @@ trace-golden:
 
 # SymbiYosys formal verification (requires OSS CAD Suite or standalone sby).
 formal:
-	$(MAKE) -C verification/formal
+	@if command -v $(SBY) >/dev/null 2>&1; then \
+		$(MAKE) -C verification/formal; \
+	else \
+		echo "[FORMAL] $(SBY) not found; install SymbiYosys (OSS CAD Suite) to run formal"; \
+	fi
 
 # Full 512-bit-width re-run of the bridge-top proof (no data abstraction), via
 # bitwuzla (keeps the wide FIFO memories as SMT arrays). Separate from `formal`.
