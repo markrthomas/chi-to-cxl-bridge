@@ -50,3 +50,5 @@ verification/uvm/vlt/obj/
 
 # root make waves / make wave output
 build/waves/
+/verification/random/runs/
+/docker/last-run-metrics.json
