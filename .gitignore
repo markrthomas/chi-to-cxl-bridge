@@ -40,7 +40,9 @@ work/
 
 # Editor and Tooling
 .vscode/
-.claude/
+# local Claude Code state only; .claude/agents, skills, settings.json and swarm.env are shared (dv-swarm-kit)
+.claude/settings.local.json
+.claude/worktrees/
 *.swp
 .codex
 NOTES
@@ -50,3 +52,5 @@ verification/uvm/vlt/obj/
 
 # root make waves / make wave output
 build/waves/
+/verification/random/runs/
+/docker/last-run-metrics.json

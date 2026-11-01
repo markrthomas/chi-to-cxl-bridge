@@ -58,6 +58,9 @@ help:
 	@echo "  Subdirectory targets:"
 	@echo "    make -C verification/directed [sim|stress|vcd|gtkwave|lint|clean]"
 	@echo "    make -C verification/formal   [all|credit_counter|reset_drain|async_fifo|chi_to_cxl_bridge|clean]"
+	@echo "  swarm      Swarm A (verification) via Claude Code; swarm-rr = Swarm B (random regression); swarm-dry = show the command"
+	@echo "  batch      the Railway batch (docker/entrypoint.sh ci); board = swarm status; heavy T=<t> = one heavy target at a time"
+	@echo "  swarm-profile / swarm-kit-check   print .claude/swarm.env / check kit drift (shared kit: markrthomas/dv-swarm-kit)"
 
 # Verilator RTL lint (delegates to directed/, which runs verilator from repo root).
 lint:
@@ -245,3 +248,6 @@ clean:
 	-$(MAKE) -C verification/formal clean
 	-$(MAKE) -C $(PYUVM_DIR) clean
 	rm -rf $(COV_DIR) build/waves sim/coverage.info sim/synth.log
+
+# shared swarm/infra targets (markrthomas/dv-swarm-kit)
+include swarm.mk
