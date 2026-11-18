@@ -18,7 +18,7 @@ COV_DIR := build/coverage
 # Minimum line-coverage floor enforced by `make coverage` (DV_STANDARDS.md).
 COV_MIN ?= 80
 
-.PHONY: help lint verible-lint verible-format sim regress check test stress vcd gtkwave waves wave coverage sva formal formal-fullwidth cdc synth ci cocotb pyuvm fcov uvm uvm-lint trace-check trace-golden clean
+.PHONY: rr-build rr rr-triage rr-replay help lint verible-lint verible-format sim regress check test stress vcd gtkwave waves wave coverage sva formal formal-fullwidth cdc synth ci cocotb pyuvm fcov uvm uvm-lint trace-check trace-golden clean
 
 # Verible style-lint / format target the synthesizable RTL (the rtl.f source list).
 VERIBLE_SRCS  := $(BRIDGE_SRCS)
@@ -52,6 +52,8 @@ help:
 	@echo "  make synth     — Yosys synthesis smoke (catch latches, area stats)"
 	@echo "  make cocotb    — alias for 'make pyuvm'"
 	@echo "  make test      — alias for 'make pyuvm' (cross-repo name; see DV_STANDARDS.md)"
+	@echo "  make rr-build  — build the random-regression sim (verification/random)"
+	@echo "  make rr N=<jobs> JOBS=<par> [SEED=<base>] — seeded random regression; rr-triage RUN=<dir>; rr-replay"
 	@echo "  make ci        — regress + pyuvm + fcov + coverage + sva + formal + synth (comprehensive)"
 	@echo "  make clean     — remove simulation build artifacts"
 	@echo ""
@@ -250,4 +252,20 @@ clean:
 	rm -rf $(COV_DIR) build/waves sim/coverage.info sim/synth.log
 
 # shared swarm/infra targets (markrthomas/dv-swarm-kit)
+# ---- Random regression (verification/random; see its README.md) --------------
+N    ?= 20
+JOBS ?= 2
+SEED ?= 1
+rr-build:
+	python3 verification/random/rr.py build
+
+rr:
+	python3 verification/random/rr.py run --n $(N) --jobs $(JOBS) --seed $(SEED)
+
+rr-triage:
+	python3 verification/random/rr.py triage --run "$(RUN)"
+
+rr-replay:
+	python3 verification/random/rr.py replay
+
 include swarm.mk

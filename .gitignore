@@ -54,3 +54,5 @@ verification/uvm/vlt/obj/
 build/waves/
 /verification/random/runs/
 /docker/last-run-metrics.json
+/verification/random/build/
+/verification/random/__pycache__/

@@ -1,0 +1,16 @@
+{
+  "entries": [
+    {"id": "baseline-mix-seed2", "seed": 2, "fixed": true, "note": "baseline guard (not a past bug): profile/bp from knobs(seed)"},
+    {"id": "baseline-burst-bp-seed7", "seed": 7, "fixed": true, "note": "baseline guard: burst profile with sink back-pressure"},
+    {"id": "baseline-write-bp-seed30", "seed": 30, "fixed": true, "note": "baseline guard: write-heavy with stalls and gaps"}
+  ],
+  "backlog": [
+    {"id": "B1", "item": "Randomize CXL responder latency / out-of-order S2M completions (needs scoreboard match by tag, already tag-keyed)"},
+    {"id": "B2", "item": "Random link_up / reset mid-traffic (reset_drain behaviour; needs scoreboard to model dropped txns)"},
+    {"id": "B3", "item": "Interleave CHI snoop (chi_snp_*) traffic with reads/writes; extend BridgeScoreboard with snoop path"},
+    {"id": "B4", "item": "Random write-data/request ordering (WrData beats delayed after DBIDResp, interleaved across writes)"},
+    {"id": "B5", "item": "Reuse TxnIDs after completion (>256 txns, tag-pool wrap) - scoreboard keyed on TxnID must become occurrence-aware"},
+    {"id": "B6", "item": "After Phase 5.1: err_inj_en / CRC fault injection with expected RESPERR/poison (blocked on RTL, owner-held)"},
+    {"id": "B7", "item": "Randomize byte-enable/poison fields in WrData (scoreboard currently checks DATA only; extend model + check together)"}
+  ]
+}
